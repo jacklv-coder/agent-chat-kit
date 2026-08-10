@@ -1,0 +1,100 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+env:
+  DESTINATION: platform=iOS Simulator,name=iPhone 16 Pro,OS=latest
+
+jobs:
+  package-build:
+    runs-on: macos-15
+    strategy:
+      matrix:
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Resolve dependencies
+        run: swift package resolve
+      - name: Build package
+        run: >-
+          xcodebuild -scheme AgentChatKit-Package
+          -destination 'generic/platform=iOS Simulator'
+          -configuration '${{ matrix.configuration }}'
+          -skipPackagePluginValidation build
+
+  package-tests:
+    runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        suite:
+          - AgentChatCoreTests
+          - AgentChatMarkdownTests
+          - AgentChatUIKitTests
+          - AgentChatIntegrationTests
+          - AgentChatPerformanceTests
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Test ${{ matrix.suite }}
+        run: >-
+          xcodebuild -scheme AgentChatKit-Package
+          -destination "$DESTINATION"
+          -only-testing:${{ matrix.suite }}
+          -skipPackagePluginValidation test
+
+  thread-sanitizer:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Run Core and integration tests with Thread Sanitizer
+        run: >-
+          xcodebuild -scheme AgentChatKit-Package
+          -destination "$DESTINATION"
+          -only-testing:AgentChatCoreTests
+          -only-testing:AgentChatIntegrationTests
+          -enableThreadSanitizer YES
+          -skipPackagePluginValidation test
+
+  demo-build:
+    runs-on: macos-15
+    strategy:
+      matrix:
+        destination:
+          - generic/platform=iOS Simulator
+          - platform=iOS Simulator,name=iPad Pro 13-inch (M4),OS=latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Build offline Demo
+        run: >-
+          xcodebuild
+          -project Examples/AgentChatDemo/AgentChatDemo.xcodeproj
+          -scheme AgentChatDemo
+          -destination '${{ matrix.destination }}'
+          -skipPackagePluginValidation build
+
+  docs-and-format:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Format lint
+        run: >-
+          xcrun swift-format lint --recursive --strict
+          Sources Tests Examples/AgentChatDemo/App Examples/AgentChatDemo/Scenarios
+          Examples/AgentChatDemo/CustomRenderers
+      - name: Build DocC
+        run: >-
+          xcodebuild docbuild -scheme AgentChatKit-Package
+          -destination 'generic/platform=iOS Simulator'
+          -skipPackagePluginValidation
