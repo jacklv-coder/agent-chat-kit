@@ -14,7 +14,7 @@ code, tests, demo path, and documentation are present.
 - [x] CI workflow baseline
 - [x] Offline Demo project source and XcodeGen definition
 - [x] Demo Debug build and simulator launch
-- [ ] All CI jobs green on GitHub
+- [x] All CI jobs green on GitHub
 
 ## Phase 1 — Core models and Runtime SPI
 
@@ -74,7 +74,7 @@ code, tests, demo path, and documentation are present.
 - [x] Swift Format strict lint
 - [x] DocC build (dependency-owned warnings are recorded)
 - [ ] Physical-device Instruments report and all six normative stress scenarios
-- [ ] Thread Sanitizer CI result
+- [x] Thread Sanitizer CI result
 - [ ] Public API baseline and 1.0 RC
 
 ## Normative layout decision
@@ -94,3 +94,4 @@ Validated 2026-08-10 with Xcode 26.6 / Swift 6.3.3:
 - Demo installed and launched successfully on an iPhone simulator;
 - DocC completed; warnings originated from `swift-markdown` 0.8.0 documentation collisions and
   missing upstream snippets, not AgentChatKit sources.
+- GitHub Actions run `31400327437` passed all 11 jobs on Xcode 16.4.
