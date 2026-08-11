@@ -68,11 +68,16 @@ final class AgentSessionIntegrationTests: XCTestCase {
             store: store
         )
         try await session.start()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        try await waitForState {
+            store.snapshot.turns.count == 1
+                && store.snapshot.turns.first?.state == .completed
+        }
 
         XCTAssertEqual(store.snapshot.turns.count, 1)
-        XCTAssertEqual(store.snapshot.turns[0].state, .completed)
-        guard case .markdown(let markdown) = store.snapshot.turns[0].blocks[0].content else {
+        let renderedTurn = try XCTUnwrap(store.snapshot.turns.first)
+        XCTAssertEqual(renderedTurn.state, .completed)
+        let block = try XCTUnwrap(renderedTurn.blocks.first)
+        guard case .markdown(let markdown) = block.content else {
             return XCTFail("Expected Markdown")
         }
         XCTAssertEqual(markdown.markdown, "Hello, world")
@@ -115,14 +120,10 @@ final class AgentSessionIntegrationTests: XCTestCase {
         try await session.send(
             .submit(.init(conversationID: conversationID, text: "Show every state"))
         )
-        for _ in 0..<100 {
-            if store.snapshot.turns.count == 2,
-                store.snapshot.turns.last?.role == .assistant,
-                store.snapshot.turns.last?.state == .completed
-            {
-                break
-            }
-            try await Task.sleep(nanoseconds: 100_000_000)
+        try await waitForState {
+            store.snapshot.turns.count == 2
+                && store.snapshot.turns.last?.role == .assistant
+                && store.snapshot.turns.last?.state == .completed
         }
 
         XCTAssertEqual(store.snapshot.turns.map(\.role), [.user, .assistant])
@@ -162,7 +163,10 @@ final class AgentSessionIntegrationTests: XCTestCase {
             store: store
         )
         try await session.start()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        try await waitForState {
+            if case .offline = store.snapshot.state { return true }
+            return false
+        }
         XCTAssertEqual(store.snapshot.turns.map(\.id), ["retained-turn"])
         guard case .offline = store.snapshot.state else {
             return XCTFail("Expected retained offline state")
@@ -181,12 +185,26 @@ final class AgentSessionIntegrationTests: XCTestCase {
         )
 
         try await session.start()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        try await waitForState {
+            if case .offline = store.snapshot.state { return true }
+            return false
+        }
 
         guard case .offline = store.snapshot.state else {
             return XCTFail("Expected a normally completed connection to become offline")
         }
         await session.stop()
+    }
+
+    private func waitForState(
+        maxAttempts: Int = 150,
+        condition: () -> Bool
+    ) async throws {
+        for _ in 0..<maxAttempts {
+            if condition() { return }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTFail("Timed out waiting for the expected session state")
     }
 }
 
