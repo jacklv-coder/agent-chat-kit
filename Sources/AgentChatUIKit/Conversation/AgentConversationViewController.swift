@@ -25,6 +25,7 @@ public final class AgentConversationViewController: UIViewController {
     private var patchTask: Task<Void, Never>?
     private var composerTask: Task<Void, Never>?
     private var expandedBlockIDs: Set<AgentBlockID> = []
+    private var initializedExpansionBlockIDs: Set<AgentBlockID> = []
     private var resolvingApprovalIDs: Set<AgentApprovalID> = []
     private var isLoadingHistory = false
     private var previousViewSize: CGSize = .zero
@@ -280,6 +281,7 @@ public final class AgentConversationViewController: UIViewController {
                     resolvingApprovalIDs: self.resolvingApprovalIDs,
                     expandedBlockIDs: self.expandedBlockIDs
                 ),
+                imageProvider: self.configuration.imageProvider,
                 actionSink: AgentBlockActionSink { [weak self] action in
                     self?.route(action)
                 }
@@ -432,6 +434,7 @@ public final class AgentConversationViewController: UIViewController {
         anchor: AgentLayoutAnchor?,
         followLatest: Bool
     ) {
+        synchronizeDefaultExpansionState()
         var snapshot = NSDiffableDataSourceSnapshot<AgentTurnID, AgentBlockID>()
         for turn in presentationTurns {
             snapshot.appendSections([turn.id])
@@ -448,6 +451,24 @@ public final class AgentConversationViewController: UIViewController {
         }
     }
 
+    private func synchronizeDefaultExpansionState() {
+        let blocks = presentationTurns.flatMap(\.blocks)
+        let liveBlockIDs = Set(blocks.map(\.id))
+        initializedExpansionBlockIDs.formIntersection(liveBlockIDs)
+        expandedBlockIDs.formIntersection(liveBlockIDs)
+
+        for block in blocks where initializedExpansionBlockIDs.insert(block.id).inserted {
+            switch block.content {
+            case .tool(let value) where value.displayMode == .expanded:
+                expandedBlockIDs.insert(block.id)
+            case .fileSearch:
+                expandedBlockIDs.insert(block.id)
+            default:
+                break
+            }
+        }
+    }
+
     private func reconcileVisibleItems() {
         var snapshot = dataSource.snapshot()
         snapshot.reconfigureItems(snapshot.itemIdentifiers)
@@ -458,7 +479,7 @@ public final class AgentConversationViewController: UIViewController {
         switch action {
         case .toggleExpanded(let blockID):
             if !expandedBlockIDs.insert(blockID).inserted { expandedBlockIDs.remove(blockID) }
-            reconfigure(blockID)
+            reconfigure(blockID, animated: true)
 
         case .copy(let blockID):
             if let block = turnAndBlock(for: blockID)?.block {
@@ -470,6 +491,16 @@ public final class AgentConversationViewController: UIViewController {
 
         case .openFile(let reference):
             perform(.host(.openResource(reference)))
+
+        case .previewImage(let reference, let alternativeText):
+            perform(
+                .host(
+                    .previewImage(
+                        reference: reference,
+                        alternativeText: alternativeText
+                    )
+                )
+            )
 
         case .openLink(let url):
             guard let scheme = url.scheme?.lowercased(),
@@ -506,15 +537,23 @@ public final class AgentConversationViewController: UIViewController {
     private func handleComposer(_ action: AgentComposerAction) {
         switch action {
         case .send(let text, let attachments):
+            let pendingState = currentComposerState()
             let request = AgentSubmitRequest(
                 conversationID: store.snapshot.id,
                 text: text,
                 attachments: attachments
             )
-            perform(.runtime(.submit(request))) { [weak self] in
-                guard let self else { return }
-                self.composer.apply(.init(isRunning: self.isConversationRunning))
-            }
+            composer.apply(.init(isRunning: true))
+            perform(
+                .runtime(.submit(request)),
+                success: { [weak self] in
+                    guard let self else { return }
+                    self.composer.apply(.init(isRunning: self.isConversationRunning))
+                },
+                failure: { [weak self] in
+                    self?.composer.apply(pendingState)
+                }
+            )
         case .stop:
             guard configuration.runtimeCapabilities.contains(.interrupt) else { return }
             perform(
@@ -529,15 +568,20 @@ public final class AgentConversationViewController: UIViewController {
     private func perform(
         _ action: AgentConversationAction,
         approvalID: AgentApprovalID? = nil,
-        success: (@MainActor () -> Void)? = nil
+        success: (@MainActor () -> Void)? = nil,
+        failure: (@MainActor () -> Void)? = nil
     ) {
-        guard let actionHandler else { return }
+        guard let actionHandler else {
+            failure?()
+            return
+        }
         Task { [weak self] in
             do {
                 try await actionHandler(action)
                 success?()
             } catch {
                 guard let self else { return }
+                failure?()
                 if let approvalID {
                     self.resolvingApprovalIDs.remove(approvalID)
                     self.reconfigureApproval(approvalID)
@@ -626,11 +670,36 @@ public final class AgentConversationViewController: UIViewController {
         }
     }
 
-    private func reconfigure(_ blockID: AgentBlockID) {
+    private func reconfigure(_ blockID: AgentBlockID, animated: Bool = false) {
         var snapshot = dataSource.snapshot()
         guard snapshot.itemIdentifiers.contains(blockID) else { return }
         snapshot.reconfigureItems([blockID])
-        dataSource.apply(snapshot, animatingDifferences: false)
+        let shouldAnimate = animated && !UIAccessibility.isReduceMotionEnabled
+        let anchor =
+            scrollCoordinator.isFollowingLatest
+            ? nil : scrollCoordinator.captureAnchor(edge: .top)
+        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
+            guard let self else { return }
+            self.collectionView.collectionViewLayout.invalidateLayout()
+            let updates = {
+                self.collectionView.layoutIfNeeded()
+                if let anchor {
+                    self.scrollCoordinator.restore(anchor)
+                } else if self.scrollCoordinator.isFollowingLatest {
+                    self.scrollCoordinator.scrollToLatest(animated: false)
+                }
+            }
+            guard shouldAnimate else {
+                updates()
+                return
+            }
+            UIView.animate(
+                withDuration: 0.24,
+                delay: 0,
+                options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut],
+                animations: updates
+            )
+        }
     }
 
     private func reconfigureApproval(_ approvalID: AgentApprovalID) {

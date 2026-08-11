@@ -14,6 +14,12 @@ enum AgentStrings {
     static var imageProvidedByHost: String {
         String(localized: "Image provided by host", bundle: .module)
     }
+    static var imageUnavailable: String {
+        String(localized: "Image unavailable", bundle: .module)
+    }
+    static var loadingImage: String {
+        String(localized: "Loading image", bundle: .module)
+    }
     static var queued: String { String(localized: "Queued", bundle: .module) }
     static var streaming: String { String(localized: "Streaming", bundle: .module) }
     static var running: String { String(localized: "Running", bundle: .module) }
@@ -34,4 +40,12 @@ enum AgentStrings {
     static var assistant: String { String(localized: "Assistant", bundle: .module) }
     static var system: String { String(localized: "System", bundle: .module) }
     static var copyRawPayload: String { String(localized: "Copy raw payload", bundle: .module) }
+    static var collapse: String { String(localized: "Collapse", bundle: .module) }
+    static var created: String { String(localized: "Created", bundle: .module) }
+    static var deleted: String { String(localized: "Deleted", bundle: .module) }
+    static var edited: String { String(localized: "Edited", bundle: .module) }
+    static var expand: String { String(localized: "Expand", bundle: .module) }
+    static var moved: String { String(localized: "Moved", bundle: .module) }
+    static var ran: String { String(localized: "Ran", bundle: .module) }
+    static var read: String { String(localized: "Read", bundle: .module) }
 }

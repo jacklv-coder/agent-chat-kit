@@ -7,6 +7,8 @@ public enum AgentHostAction: Hashable, Sendable {
     case openArtifact(AgentArtifactID)
     /// Open a referenced file or resource.
     case openResource(AgentResourceReference)
+    /// Present a referenced image in a host-owned preview experience.
+    case previewImage(reference: AgentResourceReference, alternativeText: String)
     /// Evaluate and possibly open a URL.
     case openURL(URL)
     /// Handle a namespaced action.
@@ -37,18 +39,22 @@ public struct AgentConversationConfiguration {
     public var followingThreshold: CGFloat
     /// Maximum composer height.
     public var maximumComposerHeight: CGFloat
+    /// Host-owned image resolver used by expanded image blocks.
+    public var imageProvider: (any AgentImageProviding)?
 
     /// Creates presentation policy.
     public init(
         runtimeCapabilities: AgentRuntimeCapabilities = [],
         enablesKeyboardCommands: Bool = true,
         followingThreshold: CGFloat = 80,
-        maximumComposerHeight: CGFloat = 180
+        maximumComposerHeight: CGFloat = 180,
+        imageProvider: (any AgentImageProviding)? = nil
     ) {
         self.runtimeCapabilities = runtimeCapabilities
         self.enablesKeyboardCommands = enablesKeyboardCommands
         self.followingThreshold = followingThreshold
         self.maximumComposerHeight = maximumComposerHeight
+        self.imageProvider = imageProvider
     }
 }
 

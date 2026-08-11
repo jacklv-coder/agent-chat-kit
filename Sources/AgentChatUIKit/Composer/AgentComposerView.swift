@@ -140,6 +140,7 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
         textView.delegate = self
         textView.textContainerInset = .init(top: 8, left: 4, bottom: 8, right: 4)
         textView.accessibilityLabel = AgentStrings.messagePlaceholder
+        textView.accessibilityIdentifier = "AgentComposerTextView"
 
         placeholderLabel.text = AgentStrings.messagePlaceholder
         placeholderLabel.font = .preferredFont(forTextStyle: .body)
@@ -154,10 +155,17 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
         attachmentLabel.numberOfLines = 2
 
         sendButton.addAction(UIAction { [weak self] _ in self?.sendOrStop() }, for: .touchUpInside)
+        sendButton.accessibilityIdentifier = "AgentComposerSendButton"
 
         let inputStack = UIStackView(arrangedSubviews: [attachmentLabel, textView])
         inputStack.axis = .vertical
         inputStack.spacing = 2
+        let focusRecognizer = UITapGestureRecognizer(
+            target: self,
+            action: #selector(focusFromTap)
+        )
+        focusRecognizer.cancelsTouchesInView = false
+        inputStack.addGestureRecognizer(focusRecognizer)
         let stack = UIStackView(arrangedSubviews: [attachmentButton, inputStack, sendButton])
         stack.axis = .horizontal
         stack.alignment = .bottom
@@ -201,6 +209,8 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
         textHeightConstraint?.constant = height
         textView.isScrollEnabled = size.height > maximumHeight
     }
+
+    @objc private func focusFromTap() { focus() }
 }
 
 extension AgentComposerView: UITextViewDelegate {

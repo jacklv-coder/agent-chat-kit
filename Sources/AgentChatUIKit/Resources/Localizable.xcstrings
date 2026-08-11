@@ -25,6 +25,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "变更" } }
       }
     },
+    "Collapse" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Collapse" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "收起" } }
+      }
+    },
     "Command" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Command" } },
@@ -41,6 +47,30 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy raw payload" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制原始数据" } }
+      }
+    },
+    "Created" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Created" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已创建" } }
+      }
+    },
+    "Deleted" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Deleted" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已删除" } }
+      }
+    },
+    "Edited" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Edited" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已编辑" } }
+      }
+    },
+    "Expand" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Expand" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "展开" } }
       }
     },
     "Failed" : {
@@ -61,6 +91,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "图片由宿主应用提供" } }
       }
     },
+    "Image unavailable" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Image unavailable" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "图片不可用" } }
+      }
+    },
     "Input" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Input" } },
@@ -73,10 +109,22 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "回到最新" } }
       }
     },
+    "Loading image" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Loading image" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在加载图片" } }
+      }
+    },
     "Message" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Message" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "输入消息" } }
+      }
+    },
+    "Moved" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Moved" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已移动" } }
       }
     },
     "Offline" : {
@@ -113,6 +161,18 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Queued" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "排队中" } }
+      }
+    },
+    "Ran" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Ran" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已运行" } }
+      }
+    },
+    "Read" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Read" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已读取" } }
       }
     },
     "Retry" : {

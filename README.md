@@ -73,8 +73,16 @@ xcodebuild -project AgentChatDemo.xcodeproj -scheme AgentChatDemo \
   -destination 'platform=iOS Simulator,name=iPhone 16' build
 ```
 
-The Demo contains all 18 normative scenario entries and never performs model, network, shell, or
-filesystem work. Its scripted runtime supports local submit, approval, and interrupt interactions.
+The Demo contains all 18 normative scenario entries, a complete cell showcase that combines every
+built-in block, and a current-conversation replay for checking realistic Chinese Markdown, tables,
+trees, long-message layout, and sanitized tool-activity cells for commands, image inspection, file
+edits, skills, and host integrations. Tool activity uses compact icon-and-summary rows with
+whole-row expandable details and animated height changes. Expanded image activity resolves a
+thumbnail through the injected `AgentImageProviding`; tapping it opens the Demo's full-screen
+pan-and-zoom preview. Markdown tables use a native, accessible grid with horizontal scrolling when
+needed. Submitting composer text produces an offline sequence of thinking, file search, command,
+file-read, and streaming Markdown events. The Demo never performs model, network, shell, or
+filesystem work. Its scripted runtime also supports approval and interrupt interactions.
 
 ## License
 

@@ -51,8 +51,11 @@ code, tests, demo path, and documentation are present.
 - [x] Bounded render-document cache
 - [x] Unified Diff parser with multi-file, rename, binary, marker, and truncation coverage
 - [x] Selectable TextKit fallback with revision/cancellation protection
-- [ ] Structured UIKit Markdown views for styled inline content, horizontal code, and tables
-- [ ] Image provider integration and streaming debounce policy
+- [x] Structured UIKit Markdown views for headings, code, and horizontally scrollable tables
+- [ ] Complete attributed inline styling and horizontally scrolling fenced code
+- [x] Image provider integration with loading, cancellation, reuse safety, and fallback UI
+- [x] Host-routed full-screen image preview with pan and zoom in the Demo
+- [ ] Markdown-image integration and streaming debounce policy
 
 ## Phases 5–7 — UI blocks, composer, and system integration (in progress)
 
@@ -60,10 +63,12 @@ code, tests, demo path, and documentation are present.
 - [x] Extensible renderer registry and offline custom weather renderer demo
 - [x] Approval buttons disable immediately until runtime confirmation
 - [x] Default multiline composer, Send/Stop, draft and attachment metadata
+- [x] Interactive Mock Runtime submit flow with thinking, tools, and streaming Markdown results
+- [x] Whole-row tool disclosure with icon/title/detail structure and animated height changes
 - [x] `keyboardLayoutGuide`, interactive dismissal, and hardware key commands
 - [x] Adaptive iPad content width, Light/Dark semantic theme, Dynamic Type, and VoiceOver labels
 - [x] English and Simplified Chinese String Catalog
-- [ ] Complete context menus, pointer, drag/drop, image loading, and rich block expansion behavior
+- [ ] Complete context menus, pointer, drag/drop, and remaining rich block behaviors
 - [ ] Snapshot and XCUITest matrices
 
 ## Phase 8 — Validation and RC (in progress)

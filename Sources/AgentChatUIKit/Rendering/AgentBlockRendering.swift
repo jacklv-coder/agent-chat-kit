@@ -35,6 +35,8 @@ public enum AgentBlockUIAction: Hashable, Sendable {
     case openArtifact(AgentArtifactID)
     /// Requests host navigation to a resource.
     case openFile(AgentResourceReference)
+    /// Requests a host-owned full-screen image preview.
+    case previewImage(reference: AgentResourceReference, alternativeText: String)
     /// Offers a URL candidate to the host.
     case openLink(URL)
     /// Retries a failed block.
@@ -73,6 +75,8 @@ public struct AgentBlockRenderContext {
     public let theme: AgentChatTheme
     /// Accessibility and content-size environment.
     public let environment: AgentRenderEnvironment
+    /// Optional host-owned image resolver.
+    public let imageProvider: (any AgentImageProviding)?
     /// The renderer's UI-only action sink.
     public let actionSink: AgentBlockActionSink
 
@@ -84,6 +88,7 @@ public struct AgentBlockRenderContext {
         availableWidth: CGFloat,
         theme: AgentChatTheme,
         environment: AgentRenderEnvironment,
+        imageProvider: (any AgentImageProviding)? = nil,
         actionSink: AgentBlockActionSink
     ) {
         self.conversationID = conversationID
@@ -92,6 +97,7 @@ public struct AgentBlockRenderContext {
         self.availableWidth = availableWidth
         self.theme = theme
         self.environment = environment
+        self.imageProvider = imageProvider
         self.actionSink = actionSink
     }
 }

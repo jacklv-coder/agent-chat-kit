@@ -101,6 +101,45 @@ final class AgentSessionIntegrationTests: XCTestCase {
         await connection.close()
     }
 
+    func testSubmittedMessageProducesThinkingToolsAndStreamingMarkdown() async throws {
+        let conversationID: AgentConversationID = "interactive"
+        let runtime = MockAgentRuntime(scenario: .init(events: []))
+        let store = AgentConversationStore(snapshot: .empty(conversationID: conversationID))
+        let session = AgentChatSession(
+            adapter: runtime,
+            configuration: .init(conversationID: conversationID),
+            store: store
+        )
+        try await session.start()
+
+        try await session.send(
+            .submit(.init(conversationID: conversationID, text: "Show every state"))
+        )
+        for _ in 0..<60 {
+            if store.snapshot.turns.count == 2,
+                store.snapshot.turns.last?.role == .assistant,
+                store.snapshot.turns.last?.state == .completed
+            {
+                break
+            }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        XCTAssertEqual(store.snapshot.turns.map(\.role), [.user, .assistant])
+        let assistant = try XCTUnwrap(store.snapshot.turns.last)
+        XCTAssertEqual(assistant.state, .completed)
+        XCTAssertEqual(
+            assistant.blocks.map(\.kind),
+            [.activity, .fileSearch, .command, .fileOperation, .markdown]
+        )
+        guard case .markdown(let markdown) = assistant.blocks.last?.content else {
+            return XCTFail("Expected final Markdown")
+        }
+        XCTAssertTrue(markdown.isFinal)
+        XCTAssertTrue(markdown.markdown.contains("| 阶段 | 展示结果 |"))
+        await session.stop()
+    }
+
     func testStreamFailureRetainsSnapshotAndMarksStoreOffline() async throws {
         let conversationID: AgentConversationID = "disconnect"
         let snapshot = AgentConversationSnapshot(

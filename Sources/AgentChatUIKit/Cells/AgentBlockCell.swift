@@ -57,10 +57,12 @@ final class AgentBlockCell: UICollectionViewCell {
         accessibilityValue = stateText(context.block.state)
 
         if case .markdown(let markdown) = context.block.content {
-            guard let textView = card.findSubview(of: UITextView.self) else { return }
+            guard let markdownView = card.findSubview(of: AgentMarkdownContentView.self) else {
+                return
+            }
             let blockID = context.block.id
             let revision = context.block.revision
-            asynchronousTask = Task { [weak self, weak textView] in
+            asynchronousTask = Task { [weak self, weak markdownView] in
                 let key = AgentMarkdownCacheKey(
                     blockID: blockID,
                     revision: revision,
@@ -82,18 +84,79 @@ final class AgentBlockCell: UICollectionViewCell {
                     document = parsed
                     await cache.insert(parsed, for: key)
                 }
-                let rendered = AgentMarkdownPlainTextRenderer.render(document)
                 guard let self,
                     self.representedBlockID == blockID,
                     self.representedRevision == revision
                 else { return }
-                textView?.text = rendered
-                textView?.invalidateIntrinsicContentSize()
+                markdownView?.apply(document)
+            }
+            return
+        }
+
+        startImageLoadIfNeeded(in: card, context: context)
+    }
+
+    func waitForPendingRendering() async {
+        await asynchronousTask?.value
+    }
+
+    private func startImageLoadIfNeeded(
+        in card: UIView,
+        context: AgentBlockRenderContext
+    ) {
+        guard case .image(let value) = context.block.content,
+            isCompactEventExpanded(context: context),
+            let preview = card.findSubview(of: AgentInlineImagePreviewView.self)
+        else { return }
+
+        preview.onTap = {
+            context.actionSink.send(
+                .previewImage(
+                    reference: value.reference,
+                    alternativeText: value.alternativeText
+                )
+            )
+        }
+        guard let provider = context.imageProvider else {
+            preview.showMessage(AgentStrings.imageProvidedByHost)
+            return
+        }
+
+        preview.showLoading()
+        let blockID = context.block.id
+        let revision = context.block.revision
+        let targetSize = preview.targetSize
+        let scale = UIScreen.main.scale
+        asynchronousTask = Task { [weak self, weak preview] in
+            do {
+                let image = try await provider.image(
+                    for: value.reference,
+                    targetSize: targetSize,
+                    scale: scale
+                )
+                try Task.checkCancellation()
+                guard let self,
+                    self.representedBlockID == blockID,
+                    self.representedRevision == revision
+                else { return }
+                preview?.show(image: image, alternativeText: value.alternativeText)
+            } catch is CancellationError {
+                return
+            } catch {
+                guard let self,
+                    self.representedBlockID == blockID,
+                    self.representedRevision == revision
+                else { return }
+                preview?.showMessage(AgentStrings.imageUnavailable)
             }
         }
     }
 
     private func makeCard(context: AgentBlockRenderContext) -> UIView {
+        if isCompactEvent(context.block.content) {
+            return makeCompactEvent(context: context)
+        }
+
         let container = UIView()
         let stack = UIStackView()
         stack.axis = .vertical
@@ -140,6 +203,244 @@ final class AgentBlockCell: UICollectionViewCell {
         return container
     }
 
+    private func makeCompactEvent(context: AgentBlockRenderContext) -> UIView {
+        let container = UIStackView()
+        container.axis = .vertical
+        container.spacing = 6
+        container.accessibilityIdentifier = "AgentActivityEvent"
+
+        let expanded = isCompactEventExpanded(context: context)
+        let details = compactEventDetails(context: context)
+        let hasDetails = !details.arrangedSubviews.isEmpty
+        let title = compactEventTitle(for: context.block)
+        let header = AgentCompactEventHeaderControl(
+            icon: eventIcon(for: context.block.content),
+            iconTint: eventTint(for: context.block, theme: context.theme),
+            title: title,
+            titleColor: context.theme.colors.secondaryText,
+            textStyle: context.theme.typography.body,
+            isExpanded: expanded,
+            hasDetails: hasDetails
+        ) {
+            context.actionSink.send(.toggleExpanded(context.block.id))
+        }
+        container.addArrangedSubview(header)
+
+        if hasDetails {
+            details.isHidden = !expanded
+            details.isLayoutMarginsRelativeArrangement = true
+            details.layoutMargins = .init(top: 0, left: 28, bottom: 2, right: 0)
+            details.accessibilityIdentifier = "AgentActivityEventDetails"
+            container.addArrangedSubview(details)
+        }
+        return container
+    }
+
+    private func compactEventDetails(context: AgentBlockRenderContext) -> UIStackView {
+        let stack = UIStackView()
+        stack.axis = .vertical
+        stack.spacing = 6
+
+        switch context.block.content {
+        case .activity(let value):
+            if let detail = value.detail {
+                stack.addArrangedSubview(detailLabel(detail, context: context))
+            }
+
+        case .tool(let value):
+            if let summary = value.summary {
+                stack.addArrangedSubview(detailLabel(summary, context: context))
+            }
+            addJSON(value.input, title: AgentStrings.input, to: stack, context: context)
+            addJSON(value.output, title: AgentStrings.output, to: stack, context: context)
+
+        case .command(let value):
+            stack.addArrangedSubview(codeTextView(value.command, context: context))
+            if let directory = value.workingDirectory {
+                stack.addArrangedSubview(detailLabel(directory, context: context))
+            }
+            if !value.output.text.isEmpty {
+                stack.addArrangedSubview(codeTextView(value.output.text, context: context))
+            }
+            if value.output.wasTruncated {
+                stack.addArrangedSubview(
+                    detailLabel(AgentStrings.outputTruncated, context: context))
+            }
+            var status = stateText(context.block.state)
+            if let exitCode = value.exitCode { status += " · exit \(exitCode)" }
+            if let duration = value.duration {
+                status += " · \(duration.formatted(.number.precision(.fractionLength(1))))s"
+            }
+            stack.addArrangedSubview(detailLabel(status, context: context))
+
+        case .fileSearch(let value):
+            if let root = value.root {
+                stack.addArrangedSubview(detailLabel(root, context: context))
+            }
+            for match in value.matches.prefix(8) {
+                let button = actionButton(title: match.path, context: context) {
+                    context.actionSink.send(.openFile(.localIdentifier(match.path)))
+                }
+                stack.addArrangedSubview(button)
+            }
+
+        case .fileOperation(let value):
+            if let destination = value.destinationPath {
+                stack.addArrangedSubview(detailLabel("→ \(destination)", context: context))
+            }
+            if let summary = value.summary {
+                stack.addArrangedSubview(detailLabel(summary, context: context))
+            }
+
+        case .image(let value):
+            let width = min(max(context.availableWidth * 0.5, 160), 280)
+            let preview = AgentInlineImagePreviewView(
+                size: .init(width: width, height: width * 0.75),
+                tintColor: context.theme.colors.secondaryText,
+                alternativeText: value.alternativeText
+            )
+            let row = UIStackView(arrangedSubviews: [preview, UIView()])
+            row.axis = .horizontal
+            row.alignment = .top
+            row.spacing = 0
+            stack.addArrangedSubview(row)
+
+        default:
+            break
+        }
+
+        if shouldShowCompactEventState(context.block.state),
+            !isCommand(context.block.content)
+        {
+            stack.addArrangedSubview(detailLabel(stateText(context.block.state), context: context))
+        }
+        return stack
+    }
+
+    private func isCompactEvent(_ content: AgentBlockContent) -> Bool {
+        switch content {
+        case .activity, .tool, .command, .fileSearch, .fileOperation, .image:
+            true
+        default:
+            false
+        }
+    }
+
+    private func isCompactEventExpanded(context: AgentBlockRenderContext) -> Bool {
+        context.environment.expandedBlockIDs.contains(context.block.id)
+    }
+
+    private func compactEventTitle(for block: AgentBlock) -> String {
+        switch block.content {
+        case .activity(let value):
+            value.title
+        case .tool(let value):
+            value.title
+        case .command(let value):
+            "\(commandVerb(for: block.state)) \(value.command)"
+        case .fileSearch(let value):
+            "\(AgentStrings.fileSearch) \(value.query)"
+        case .fileOperation(let value):
+            "\(fileOperationVerb(value.operation)) \(value.path)"
+        case .image(let value):
+            value.alternativeText
+        default:
+            accessibilityText(for: block)
+        }
+    }
+
+    private func commandVerb(for state: AgentBlockState) -> String {
+        switch state {
+        case .queued:
+            AgentStrings.queued
+        case .streaming, .running, .waitingForApproval:
+            AgentStrings.running
+        case .succeeded:
+            AgentStrings.ran
+        case .failed:
+            AgentStrings.failed
+        case .cancelled:
+            AgentStrings.cancelled
+        }
+    }
+
+    private func fileOperationVerb(_ operation: AgentFileOperation) -> String {
+        switch operation {
+        case .read: AgentStrings.read
+        case .create: AgentStrings.created
+        case .update: AgentStrings.edited
+        case .delete: AgentStrings.deleted
+        case .move: AgentStrings.moved
+        }
+    }
+
+    private func eventIcon(for content: AgentBlockContent) -> UIImage? {
+        let symbol: String
+        switch content {
+        case .activity(let value):
+            let title = value.title.lowercased()
+            if title.contains("command") || title.contains("命令") {
+                symbol = "terminal"
+            } else if title.contains("skill") || title.contains("技能") {
+                symbol = "wrench"
+            } else {
+                symbol = "bolt.horizontal"
+            }
+        case .tool(let value):
+            let name = value.toolName.lowercased()
+            if name.contains("simulator") || name.contains("iphone") {
+                symbol = "iphone"
+            } else if name.contains("browser") {
+                symbol = "globe"
+            } else if name.contains("skill") {
+                symbol = "wrench"
+            } else {
+                symbol = "wrench.and.screwdriver"
+            }
+        case .command:
+            symbol = "terminal"
+        case .fileSearch:
+            symbol = "doc.text.magnifyingglass"
+        case .fileOperation(let value):
+            switch value.operation {
+            case .read: symbol = "doc.text"
+            case .create: symbol = "doc.badge.plus"
+            case .update: symbol = "pencil"
+            case .delete: symbol = "trash"
+            case .move: symbol = "arrow.right.doc.on.clipboard"
+            }
+        case .image:
+            symbol = "photo.on.rectangle"
+        default:
+            symbol = "circle"
+        }
+        return UIImage(systemName: symbol)
+            ?? UIImage(systemName: "chevron.left.forwardslash.chevron.right")
+    }
+
+    private func eventTint(for block: AgentBlock, theme: AgentChatTheme) -> UIColor {
+        if case .failed = block.state { return theme.colors.destructive }
+        if case .running = block.state { return theme.colors.accent }
+        if case .streaming = block.state { return theme.colors.accent }
+        if case .tool(let value) = block.content {
+            let name = value.toolName.lowercased()
+            if name.contains("simulator") || name.contains("iphone") {
+                return theme.colors.accent
+            }
+        }
+        return theme.colors.secondaryText
+    }
+
+    private func shouldShowCompactEventState(_ state: AgentBlockState) -> Bool {
+        if case .succeeded = state { return false }
+        return true
+    }
+
+    private func isCommand(_ content: AgentBlockContent) -> Bool {
+        if case .command = content { return true }
+        return false
+    }
+
     private func populate(_ stack: UIStackView, context: AgentBlockRenderContext) {
         switch context.block.content {
         case .userText(let value):
@@ -149,7 +450,9 @@ final class AgentBlockCell: UICollectionViewCell {
             }
 
         case .markdown(let value):
-            stack.addArrangedSubview(textView(value.markdown, context: context))
+            stack.addArrangedSubview(
+                AgentMarkdownContentView(source: value.markdown, context: context)
+            )
 
         case .activity(let value):
             stack.addArrangedSubview(titleLabel(value.title, context: context))
@@ -426,6 +729,463 @@ final class AgentBlockCell: UICollectionViewCell {
 }
 
 @MainActor
+final class AgentCompactEventHeaderControl: UIControl {
+    private let activation: @MainActor () -> Void
+
+    init(
+        icon: UIImage?,
+        iconTint: UIColor,
+        title: String,
+        titleColor: UIColor,
+        textStyle: UIFont.TextStyle,
+        isExpanded: Bool,
+        hasDetails: Bool,
+        activation: @escaping @MainActor () -> Void
+    ) {
+        self.activation = activation
+        super.init(frame: .zero)
+
+        accessibilityIdentifier = "AgentActivityEventHeader"
+        accessibilityLabel = title
+        accessibilityValue =
+            hasDetails
+            ? (isExpanded ? AgentStrings.collapse : AgentStrings.expand)
+            : nil
+        accessibilityTraits = hasDetails ? [.button] : [.staticText]
+        isAccessibilityElement = true
+        isEnabled = hasDetails
+
+        let iconView = UIImageView(image: icon)
+        iconView.preferredSymbolConfiguration = .init(textStyle: .body, scale: .medium)
+        iconView.tintColor = iconTint
+        iconView.contentMode = .scaleAspectFit
+        iconView.accessibilityIdentifier = "AgentActivityEventIcon"
+        iconView.setContentHuggingPriority(.required, for: .horizontal)
+        NSLayoutConstraint.activate([
+            iconView.widthAnchor.constraint(equalToConstant: 20),
+            iconView.heightAnchor.constraint(equalToConstant: 20),
+        ])
+
+        let titleLabel = UILabel()
+        titleLabel.font = .preferredFont(forTextStyle: textStyle)
+        titleLabel.adjustsFontForContentSizeCategory = true
+        titleLabel.textColor = titleColor
+        titleLabel.numberOfLines = 1
+        titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.text = title
+        titleLabel.accessibilityIdentifier = "AgentActivityEventTitle"
+
+        let disclosure = UIImageView(
+            image: UIImage(systemName: isExpanded ? "chevron.down" : "chevron.right")
+        )
+        disclosure.preferredSymbolConfiguration = .init(textStyle: .caption1, scale: .small)
+        disclosure.tintColor = titleColor
+        disclosure.contentMode = .scaleAspectFit
+        disclosure.accessibilityIdentifier = "AgentActivityEventDisclosure"
+        disclosure.isHidden = !hasDetails
+        disclosure.setContentHuggingPriority(.required, for: .horizontal)
+        NSLayoutConstraint.activate([
+            disclosure.widthAnchor.constraint(equalToConstant: 18),
+            disclosure.heightAnchor.constraint(equalToConstant: 18),
+        ])
+
+        let stack = UIStackView(arrangedSubviews: [iconView, titleLabel, disclosure])
+        stack.axis = .horizontal
+        stack.alignment = .center
+        stack.spacing = 8
+        stack.isUserInteractionEnabled = false
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 36),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        addAction(UIAction { [weak self] _ in self?.activation() }, for: .touchUpInside)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override var isHighlighted: Bool {
+        didSet {
+            guard isEnabled else { return }
+            alpha = isHighlighted ? 0.55 : 1
+        }
+    }
+}
+
+@MainActor
+final class AgentMarkdownContentView: UIView {
+    private let stack = UIStackView()
+    private let bodyTextStyle: UIFont.TextStyle
+    private let bodyColor: UIColor
+    private let secondaryColor: UIColor
+    private let accentColor: UIColor
+    private let codePointSize: CGFloat
+    private let availableWidth: CGFloat
+
+    init(source: String, context: AgentBlockRenderContext) {
+        self.bodyTextStyle = context.theme.typography.body
+        self.bodyColor = context.theme.colors.primaryText
+        self.secondaryColor = context.theme.colors.secondaryText
+        self.accentColor = context.theme.colors.accent
+        self.codePointSize = context.theme.typography.codePointSize
+        self.availableWidth = max(1, context.availableWidth - 20)
+        super.init(frame: .zero)
+
+        stack.axis = .vertical
+        stack.spacing = 10
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        stack.addArrangedSubview(makeTextView(source))
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    func apply(_ document: AgentMarkdownRenderDocument) {
+        removeRenderedViews()
+        for block in document.blocks {
+            stack.addArrangedSubview(makeView(for: block))
+        }
+        invalidateIntrinsicContentSize()
+        setNeedsLayout()
+    }
+
+    private func makeView(for block: AgentMarkdownRenderBlock) -> UIView {
+        switch block {
+        case .heading(let level, let content):
+            let label = UILabel()
+            label.font = .preferredFont(forTextStyle: headingTextStyle(level: level))
+            label.adjustsFontForContentSizeCategory = true
+            label.textColor = bodyColor
+            label.numberOfLines = 0
+            label.text = AgentMarkdownPlainTextRenderer.inline(content)
+            return label
+
+        case .codeBlock(let language, let code):
+            let view = makeTextView([language, code].compactMap { $0 }.joined(separator: "\n"))
+            view.font = UIFontMetrics(forTextStyle: .body).scaledFont(
+                for: .monospacedSystemFont(ofSize: codePointSize, weight: .regular)
+            )
+            view.backgroundColor = .tertiarySystemFill
+            view.layer.cornerRadius = 8
+            view.textContainerInset = .init(top: 8, left: 8, bottom: 8, right: 8)
+            return view
+
+        case .thematicBreak:
+            let separator = UIView()
+            separator.backgroundColor = .separator
+            separator.heightAnchor.constraint(equalToConstant: 1 / UIScreen.main.scale).isActive =
+                true
+            return separator
+
+        case .table(let table):
+            return AgentMarkdownTableView(
+                table: table,
+                availableWidth: availableWidth,
+                bodyTextStyle: bodyTextStyle,
+                bodyColor: bodyColor,
+                secondaryColor: secondaryColor
+            )
+
+        default:
+            return makeTextView(AgentMarkdownPlainTextRenderer.render(block))
+        }
+    }
+
+    private func makeTextView(_ text: String) -> AgentSelectableTextView {
+        let view = AgentSelectableTextView()
+        view.font = .preferredFont(forTextStyle: bodyTextStyle)
+        view.adjustsFontForContentSizeCategory = true
+        view.textColor = bodyColor
+        view.linkTextAttributes = [.foregroundColor: accentColor]
+        view.text = text
+        return view
+    }
+
+    private func headingTextStyle(level: Int) -> UIFont.TextStyle {
+        switch level {
+        case 1: .title2
+        case 2: .title3
+        default: .headline
+        }
+    }
+
+    private func removeRenderedViews() {
+        for view in stack.arrangedSubviews {
+            stack.removeArrangedSubview(view)
+            view.removeFromSuperview()
+        }
+    }
+}
+
+@MainActor
+final class AgentMarkdownTableView: UIScrollView {
+    private let renderedHeight: CGFloat
+
+    init(
+        table: AgentMarkdownTable,
+        availableWidth: CGFloat,
+        bodyTextStyle: UIFont.TextStyle,
+        bodyColor: UIColor,
+        secondaryColor: UIColor
+    ) {
+        let rows = [table.header] + table.rows
+        let columnCount = max(1, rows.map(\.count).max() ?? 0)
+        let columnWidth = max(120, floor(availableWidth / CGFloat(columnCount)))
+        let font = UIFont.preferredFont(forTextStyle: bodyTextStyle)
+        let headerFont = UIFont.preferredFont(forTextStyle: .headline)
+        let rowHeights = rows.enumerated().map { index, row in
+            Self.rowHeight(
+                row: row,
+                columnCount: columnCount,
+                columnWidth: columnWidth,
+                font: index == 0 ? headerFont : font
+            )
+        }
+        self.renderedHeight = max(44, rowHeights.reduce(0, +))
+        super.init(frame: .zero)
+
+        accessibilityIdentifier = "AgentMarkdownTable"
+        showsHorizontalScrollIndicator = columnWidth * CGFloat(columnCount) > availableWidth
+        alwaysBounceHorizontal = showsHorizontalScrollIndicator
+        alwaysBounceVertical = false
+        isDirectionalLockEnabled = true
+        delaysContentTouches = false
+
+        let grid = UIStackView()
+        grid.axis = .vertical
+        grid.spacing = 0
+        grid.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(grid)
+        NSLayoutConstraint.activate([
+            grid.leadingAnchor.constraint(equalTo: contentLayoutGuide.leadingAnchor),
+            grid.trailingAnchor.constraint(equalTo: contentLayoutGuide.trailingAnchor),
+            grid.topAnchor.constraint(equalTo: contentLayoutGuide.topAnchor),
+            grid.bottomAnchor.constraint(equalTo: contentLayoutGuide.bottomAnchor),
+            grid.widthAnchor.constraint(equalToConstant: columnWidth * CGFloat(columnCount)),
+        ])
+
+        let headerTitles = table.header.map(AgentMarkdownPlainTextRenderer.inline)
+        for (rowIndex, row) in rows.enumerated() {
+            let rowView = UIStackView()
+            rowView.axis = .horizontal
+            rowView.spacing = 0
+            rowView.distribution = .fill
+            rowView.heightAnchor.constraint(equalToConstant: rowHeights[rowIndex]).isActive = true
+
+            for columnIndex in 0..<columnCount {
+                let text =
+                    columnIndex < row.count
+                    ? AgentMarkdownPlainTextRenderer.inline(row[columnIndex])
+                    : ""
+                let cell = Self.makeCell(
+                    text: text,
+                    columnTitle: columnIndex < headerTitles.count
+                        ? headerTitles[columnIndex] : "",
+                    alignment: columnIndex < table.alignments.count
+                        ? table.alignments[columnIndex] : .unspecified,
+                    isHeader: rowIndex == 0,
+                    width: columnWidth,
+                    font: rowIndex == 0 ? headerFont : font,
+                    bodyColor: bodyColor,
+                    secondaryColor: secondaryColor
+                )
+                rowView.addArrangedSubview(cell)
+            }
+            grid.addArrangedSubview(rowView)
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    override var intrinsicContentSize: CGSize {
+        .init(width: UIView.noIntrinsicMetric, height: renderedHeight)
+    }
+
+    private static func rowHeight(
+        row: [[AgentMarkdownInline]],
+        columnCount: Int,
+        columnWidth: CGFloat,
+        font: UIFont
+    ) -> CGFloat {
+        let contentHeight =
+            (0..<columnCount).map { index -> CGFloat in
+                let text =
+                    index < row.count
+                    ? AgentMarkdownPlainTextRenderer.inline(row[index])
+                    : ""
+                let rect = (text as NSString).boundingRect(
+                    with: .init(width: columnWidth - 24, height: .greatestFiniteMagnitude),
+                    options: [.usesFontLeading, .usesLineFragmentOrigin],
+                    attributes: [.font: font],
+                    context: nil
+                )
+                return ceil(rect.height) + 20
+            }.max() ?? 44
+        return max(44, contentHeight)
+    }
+
+    private static func makeCell(
+        text: String,
+        columnTitle: String,
+        alignment: AgentMarkdownTable.Alignment,
+        isHeader: Bool,
+        width: CGFloat,
+        font: UIFont,
+        bodyColor: UIColor,
+        secondaryColor: UIColor
+    ) -> UIView {
+        let container = UIView()
+        container.backgroundColor =
+            isHeader
+            ? UIColor.secondarySystemBackground
+            : UIColor.systemBackground
+        container.layer.borderWidth = 1 / UIScreen.main.scale
+        container.layer.borderColor = UIColor.separator.cgColor
+        container.widthAnchor.constraint(equalToConstant: width).isActive = true
+        container.accessibilityIdentifier = "AgentMarkdownTableCell"
+        container.isAccessibilityElement = true
+        container.accessibilityLabel =
+            columnTitle.isEmpty
+            ? text : "\(columnTitle): \(text)"
+        container.accessibilityTraits = isHeader ? [.header] : [.staticText]
+
+        let label = UILabel()
+        label.font = font
+        label.adjustsFontForContentSizeCategory = true
+        label.textColor = isHeader ? bodyColor : secondaryColor
+        label.numberOfLines = 0
+        label.text = text
+        switch alignment {
+        case .center: label.textAlignment = .center
+        case .trailing: label.textAlignment = .right
+        case .leading, .unspecified: label.textAlignment = .natural
+        }
+        label.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
+            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+        ])
+        return container
+    }
+}
+
+@MainActor
+final class AgentInlineImagePreviewView: UIView {
+    let targetSize: CGSize
+    var onTap: (@MainActor () -> Void)?
+
+    private let imageView = UIImageView()
+    private let activityIndicator = UIActivityIndicatorView(style: .medium)
+    private let messageLabel = UILabel()
+
+    init(size: CGSize, tintColor: UIColor, alternativeText: String) {
+        self.targetSize = size
+        super.init(frame: .zero)
+
+        translatesAutoresizingMaskIntoConstraints = false
+        backgroundColor = .secondarySystemBackground
+        layer.cornerRadius = 10
+        layer.borderWidth = 1 / UIScreen.main.scale
+        layer.borderColor = UIColor.separator.cgColor
+        clipsToBounds = true
+        accessibilityIdentifier = "AgentInlineImagePreview"
+        accessibilityLabel = alternativeText
+        isAccessibilityElement = true
+        accessibilityTraits = [.image, .button]
+
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        imageView.contentMode = .scaleAspectFit
+        imageView.isHidden = true
+        imageView.accessibilityIdentifier = "AgentInlineImagePreviewImage"
+        addSubview(imageView)
+
+        activityIndicator.translatesAutoresizingMaskIntoConstraints = false
+        activityIndicator.color = tintColor
+        activityIndicator.hidesWhenStopped = true
+        addSubview(activityIndicator)
+
+        messageLabel.translatesAutoresizingMaskIntoConstraints = false
+        messageLabel.font = .preferredFont(forTextStyle: .caption1)
+        messageLabel.adjustsFontForContentSizeCategory = true
+        messageLabel.textColor = tintColor
+        messageLabel.textAlignment = .center
+        messageLabel.numberOfLines = 2
+        messageLabel.accessibilityIdentifier = "AgentInlineImagePreviewMessage"
+        addSubview(messageLabel)
+
+        NSLayoutConstraint.activate([
+            widthAnchor.constraint(equalToConstant: size.width),
+            heightAnchor.constraint(equalToConstant: size.height),
+            imageView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            imageView.topAnchor.constraint(equalTo: topAnchor),
+            imageView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            activityIndicator.centerXAnchor.constraint(equalTo: centerXAnchor),
+            activityIndicator.centerYAnchor.constraint(equalTo: centerYAnchor),
+            messageLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            messageLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            messageLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(didTap)))
+        showMessage(AgentStrings.imageProvidedByHost)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    func showLoading() {
+        imageView.image = nil
+        imageView.isHidden = true
+        messageLabel.text = AgentStrings.loadingImage
+        messageLabel.isHidden = false
+        activityIndicator.startAnimating()
+    }
+
+    func show(image: UIImage, alternativeText: String) {
+        activityIndicator.stopAnimating()
+        messageLabel.isHidden = true
+        imageView.image = image
+        imageView.isHidden = false
+        accessibilityLabel = alternativeText
+    }
+
+    func showMessage(_ message: String) {
+        activityIndicator.stopAnimating()
+        imageView.image = nil
+        imageView.isHidden = true
+        messageLabel.text = message
+        messageLabel.isHidden = false
+    }
+
+    override func accessibilityActivate() -> Bool {
+        onTap?()
+        return onTap != nil
+    }
+
+    @objc private func didTap() {
+        onTap?()
+    }
+}
+
+@MainActor
 final class AgentSelectableTextView: UITextView {
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
@@ -481,7 +1241,7 @@ private enum AgentMarkdownPlainTextRenderer {
         document.blocks.map(render).joined(separator: "\n\n")
     }
 
-    private static func render(_ block: AgentMarkdownRenderBlock) -> String {
+    static func render(_ block: AgentMarkdownRenderBlock) -> String {
         switch block {
         case .paragraph(let content): inline(content)
         case .heading(_, let content): inline(content)
@@ -506,7 +1266,7 @@ private enum AgentMarkdownPlainTextRenderer {
         }
     }
 
-    private static func inline(_ content: [AgentMarkdownInline]) -> String {
+    static func inline(_ content: [AgentMarkdownInline]) -> String {
         content.map { value in
             switch value {
             case .text(let text), .code(let text), .unsupported(let text): text

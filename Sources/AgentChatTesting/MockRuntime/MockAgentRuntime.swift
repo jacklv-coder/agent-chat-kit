@@ -107,6 +107,7 @@ private actor MockConnectionController {
     private var nextCommandSequence: Int64
     private var nextCommandTimestamp: Date
     private var generatedEventCount: Int64 = 0
+    private var responseTasks: [Int: Task<Void, Never>] = [:]
 
     init(
         scenario: AgentScenario,
@@ -144,9 +145,10 @@ private actor MockConnectionController {
         received.append(command)
         switch command {
         case .submit(let request):
-            let userTurnID = AgentTurnID(rawValue: "mock-user-\(received.count)")
+            let requestIndex = received.count
+            let userTurnID = AgentTurnID(rawValue: "mock-user-\(requestIndex)")
             let userBlock = AgentBlock(
-                id: .init(rawValue: "mock-user-block-\(received.count)"),
+                id: .init(rawValue: "mock-user-block-\(requestIndex)"),
                 kind: .userText,
                 content: .userText(
                     .init(text: request.text, attachments: request.attachments)
@@ -167,17 +169,17 @@ private actor MockConnectionController {
                     )
                 )
             )
-            let assistantTurnID = AgentTurnID(rawValue: "mock-assistant-\(received.count)")
-            let assistantBlock = AgentBlock(
-                id: .init(rawValue: "mock-assistant-block-\(received.count)"),
-                kind: .markdown,
-                content: .markdown(
+            let assistantTurnID = AgentTurnID(rawValue: "mock-assistant-\(requestIndex)")
+            let thinkingBlock = AgentBlock(
+                id: .init(rawValue: "mock-thinking-\(requestIndex)"),
+                kind: .activity,
+                content: .activity(
                     .init(
-                        markdown: "Offline mock runtime received your message.",
-                        isFinal: true
+                        title: "正在思考",
+                        detail: "正在分析消息并规划可展示的 Demo 响应。"
                     )
                 ),
-                state: .succeeded,
+                state: .running(progress: nil),
                 createdAt: nextCommandTimestamp
             )
             await emitGenerated(
@@ -186,13 +188,20 @@ private actor MockConnectionController {
                     .init(
                         id: assistantTurnID,
                         role: .assistant,
-                        blocks: [assistantBlock],
-                        state: .completed,
-                        createdAt: nextCommandTimestamp,
-                        completedAt: nextCommandTimestamp
+                        blocks: [thinkingBlock],
+                        state: .running,
+                        createdAt: nextCommandTimestamp
                     )
                 )
             )
+            responseTasks[requestIndex]?.cancel()
+            responseTasks[requestIndex] = Task { [weak self] in
+                await self?.produceInteractiveResponse(
+                    request: request,
+                    requestIndex: requestIndex,
+                    turnID: assistantTurnID
+                )
+            }
 
         case .approve(let response), .reject(let response):
             await emitGenerated(
@@ -207,6 +216,8 @@ private actor MockConnectionController {
             )
 
         case .interrupt(let request):
+            for task in responseTasks.values { task.cancel() }
+            responseTasks.removeAll()
             guard var lastTurn = latestSnapshot.turns.last else { return }
             lastTurn.state = .cancelled
             lastTurn.completedAt = nextCommandTimestamp
@@ -235,6 +246,8 @@ private actor MockConnectionController {
         isClosed = true
         producer?.cancel()
         producer = nil
+        for task in responseTasks.values { task.cancel() }
+        responseTasks.removeAll()
         continuation.finish()
     }
 
@@ -261,5 +274,246 @@ private actor MockConnectionController {
         nextCommandSequence += 1
         nextCommandTimestamp = nextCommandTimestamp.addingTimeInterval(1)
         await emit(event)
+    }
+
+    private func produceInteractiveResponse(
+        request: AgentSubmitRequest,
+        requestIndex: Int,
+        turnID: AgentTurnID
+    ) async {
+        let thinkingID = AgentBlockID(rawValue: "mock-thinking-\(requestIndex)")
+        let searchID = AgentBlockID(rawValue: "mock-search-\(requestIndex)")
+        let commandID = AgentBlockID(rawValue: "mock-command-\(requestIndex)")
+        let readID = AgentBlockID(rawValue: "mock-read-\(requestIndex)")
+        let markdownID = AgentBlockID(rawValue: "mock-markdown-\(requestIndex)")
+        let thinkingCreatedAt =
+            latestSnapshot.turns.first(where: { $0.id == turnID })?.blocks.first(where: {
+                $0.id == thinkingID
+            })?.createdAt ?? nextCommandTimestamp
+
+        guard await pause(milliseconds: 450) else { return }
+        await emitGenerated(
+            conversationID: request.conversationID,
+            payload: .blockReplaced(
+                turnID: turnID,
+                block: AgentBlock(
+                    id: thinkingID,
+                    kind: .activity,
+                    content: .activity(
+                        .init(
+                            title: "已完成思考",
+                            detail: "已生成安全摘要；不会展示私有推理过程。"
+                        )
+                    ),
+                    state: .succeeded,
+                    revision: 1,
+                    createdAt: thinkingCreatedAt
+                )
+            )
+        )
+
+        guard await pause(milliseconds: 320) else { return }
+        await emitGenerated(
+            conversationID: request.conversationID,
+            payload: .blockInserted(
+                turnID: turnID,
+                block: AgentBlock(
+                    id: searchID,
+                    kind: .fileSearch,
+                    content: .fileSearch(
+                        .init(
+                            query: "AgentConversationViewController",
+                            root: "Sources",
+                            matches: [
+                                .init(
+                                    path:
+                                        "Sources/AgentChatUIKit/Conversation/AgentConversationViewController.swift",
+                                    excerpt: "public final class AgentConversationViewController",
+                                    line: 6
+                                ),
+                                .init(
+                                    path: "Sources/AgentChatUIKit/Cells/AgentBlockCell.swift",
+                                    excerpt: "final class AgentBlockCell",
+                                    line: 6
+                                ),
+                            ],
+                            totalCount: 2
+                        )
+                    ),
+                    state: .succeeded,
+                    createdAt: nextCommandTimestamp
+                )
+            )
+        )
+
+        guard await pause(milliseconds: 320) else { return }
+        let commandCreatedAt = nextCommandTimestamp
+        await emitGenerated(
+            conversationID: request.conversationID,
+            payload: .blockInserted(
+                turnID: turnID,
+                block: AgentBlock(
+                    id: commandID,
+                    kind: .command,
+                    content: .command(
+                        .init(command: "swift test --filter AgentTimelineTests")
+                    ),
+                    state: .running(progress: nil),
+                    createdAt: commandCreatedAt
+                )
+            )
+        )
+
+        guard await pause(milliseconds: 420) else { return }
+        await emitGenerated(
+            conversationID: request.conversationID,
+            payload: .blockDelta(
+                .init(
+                    turnID: turnID,
+                    blockID: commandID,
+                    baseRevision: 0,
+                    nextRevision: 1,
+                    operation: .appendCommandOutput("Building AgentChatKit…\n")
+                )
+            )
+        )
+
+        guard await pause(milliseconds: 320) else { return }
+        var commandOutput = AgentTextBuffer()
+        commandOutput.append("Building AgentChatKit…\nAll selected tests passed.\n")
+        await emitGenerated(
+            conversationID: request.conversationID,
+            payload: .blockReplaced(
+                turnID: turnID,
+                block: AgentBlock(
+                    id: commandID,
+                    kind: .command,
+                    content: .command(
+                        .init(
+                            command: "swift test --filter AgentTimelineTests",
+                            workingDirectory: "/project",
+                            output: commandOutput,
+                            exitCode: 0,
+                            duration: 0.7
+                        )
+                    ),
+                    state: .succeeded,
+                    revision: 2,
+                    createdAt: commandCreatedAt
+                )
+            )
+        )
+
+        guard await pause(milliseconds: 300) else { return }
+        await emitGenerated(
+            conversationID: request.conversationID,
+            payload: .blockInserted(
+                turnID: turnID,
+                block: AgentBlock(
+                    id: readID,
+                    kind: .fileOperation,
+                    content: .fileOperation(
+                        .init(
+                            operation: .read,
+                            path: "AgentChatKit_iOS_iPadOS_v1_1_Engineering_Spec.md",
+                            summary: "读取了工程规范并核对交互要求。"
+                        )
+                    ),
+                    state: .succeeded,
+                    createdAt: nextCommandTimestamp
+                )
+            )
+        )
+
+        guard await pause(milliseconds: 320) else { return }
+        await emitGenerated(
+            conversationID: request.conversationID,
+            payload: .blockInserted(
+                turnID: turnID,
+                block: AgentBlock(
+                    id: markdownID,
+                    kind: .markdown,
+                    content: .markdown(.init(markdown: "", isFinal: false)),
+                    state: .streaming,
+                    createdAt: nextCommandTimestamp
+                )
+            )
+        )
+
+        let escapedInput = request.text.replacingOccurrences(of: "|", with: "\\|")
+        let chunks = [
+            "## Demo 实时响应\n\n已收到：**\(escapedInput)**\n\n",
+            "| 阶段 | 展示结果 |\n| --- | --- |\n",
+            "| 思考摘要 | 已完成 |\n| 文件搜索 | 找到 2 项 |\n",
+            "| 命令执行 | 测试通过 |\n| Markdown 表格 | 原生 UIKit 渲染 |",
+        ]
+        var revision: Int64 = 0
+        var finalMarkdown = ""
+        for chunk in chunks {
+            guard await pause(milliseconds: 240) else { return }
+            finalMarkdown += chunk
+            await emitGenerated(
+                conversationID: request.conversationID,
+                payload: .blockDelta(
+                    .init(
+                        turnID: turnID,
+                        blockID: markdownID,
+                        baseRevision: revision,
+                        nextRevision: revision + 1,
+                        operation: .appendMarkdown(chunk)
+                    )
+                )
+            )
+            revision += 1
+        }
+
+        await emitGenerated(
+            conversationID: request.conversationID,
+            payload: .blockDelta(
+                .init(
+                    turnID: turnID,
+                    blockID: markdownID,
+                    baseRevision: revision,
+                    nextRevision: revision + 1,
+                    operation: .replaceContent(
+                        .markdown(.init(markdown: finalMarkdown, isFinal: true))
+                    )
+                )
+            )
+        )
+        revision += 1
+        await emitGenerated(
+            conversationID: request.conversationID,
+            payload: .blockDelta(
+                .init(
+                    turnID: turnID,
+                    blockID: markdownID,
+                    baseRevision: revision,
+                    nextRevision: revision + 1,
+                    operation: .setState(.succeeded)
+                )
+            )
+        )
+
+        guard var completedTurn = latestSnapshot.turns.first(where: { $0.id == turnID }) else {
+            return
+        }
+        completedTurn.state = .completed
+        completedTurn.completedAt = nextCommandTimestamp
+        await emitGenerated(
+            conversationID: request.conversationID,
+            payload: .turnUpdated(completedTurn)
+        )
+        responseTasks[requestIndex] = nil
+    }
+
+    private func pause(milliseconds: UInt64) async -> Bool {
+        do {
+            try await Task.sleep(nanoseconds: milliseconds * 1_000_000)
+            try Task.checkCancellation()
+            return !isClosed
+        } catch {
+            return false
+        }
     }
 }

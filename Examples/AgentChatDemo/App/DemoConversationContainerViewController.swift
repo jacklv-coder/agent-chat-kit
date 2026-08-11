@@ -7,10 +7,13 @@ final class DemoConversationContainerViewController: UIViewController {
     private let scenario: DemoScenario
     private let session: AgentChatSession
     private let conversationController: AgentConversationViewController
+    private let imageProvider: DemoImageProvider
     private var usesDarkTheme = false
 
     init(scenario: DemoScenario) {
         self.scenario = scenario
+        let imageProvider = DemoImageProvider()
+        self.imageProvider = imageProvider
         let runtime = MockAgentRuntime(scenario: scenario.makeScenario())
         let store = AgentConversationStore(
             snapshot: .empty(conversationID: scenario.conversationID)
@@ -28,7 +31,8 @@ final class DemoConversationContainerViewController: UIViewController {
                 runtimeCapabilities: [
                     .streamingText, .tools, .commands, .fileOperations, .diffs,
                     .approvals, .attachments, .history, .retry, .interrupt, .customBlocks,
-                ]
+                ],
+                imageProvider: imageProvider
             ),
             rendererRegistry: registry
         )
@@ -87,6 +91,17 @@ final class DemoConversationContainerViewController: UIViewController {
     }
 
     private func show(_ action: AgentHostAction) {
+        if case .previewImage(let reference, let alternativeText) = action {
+            let preview = DemoImagePreviewViewController(
+                reference: reference,
+                alternativeText: alternativeText,
+                provider: imageProvider
+            )
+            let navigationController = UINavigationController(rootViewController: preview)
+            navigationController.modalPresentationStyle = .fullScreen
+            present(navigationController, animated: true)
+            return
+        }
         let alert = UIAlertController(
             title: "Host action",
             message: String(describing: action),
