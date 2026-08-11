@@ -24,6 +24,16 @@ enum DemoScenario: String, CaseIterable {
     case accessibility = "Accessibility"
     case chineseContent = "Chinese Content"
 
+    var identifier: String {
+        rawValue.lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .replacingOccurrences(of: "&", with: "and")
+    }
+
+    static func scenario(identifier: String) -> DemoScenario? {
+        allCases.first { $0.identifier == identifier || $0.rawValue == identifier }
+    }
+
     var conversationID: AgentConversationID {
         .init(rawValue: rawValue.lowercased().replacingOccurrences(of: " ", with: "-"))
     }
@@ -65,6 +75,32 @@ enum DemoScenario: String, CaseIterable {
                 payload: .snapshot(snapshot())
             )
             return .init(events: [.init(event: event, delayNanoseconds: 20_000_000)])
+        }
+    }
+
+    func makeDocument() -> AgentScenarioDocument {
+        .init(
+            id: identifier,
+            title: rawValue,
+            summary: summary,
+            tags: scenarioTags,
+            scenario: makeScenario()
+        )
+    }
+
+    private var scenarioTags: [String] {
+        switch self {
+        case .basicStreaming: ["streaming", "markdown"]
+        case .markdownShowcase, .chineseContent: ["markdown", "content"]
+        case .completeShowcase, .currentConversation: ["showcase", "replay"]
+        case .shellCommand, .longCommandOutput: ["tool", "command"]
+        case .fileSearch, .fileChanges, .unifiedDiff: ["tool", "file"]
+        case .approval, .failureAndRetry, .interrupt, .offlineAndReconnect:
+            ["lifecycle", "interaction"]
+        case .historyPagination, .longConversation: ["scrolling", "history"]
+        case .iPadStageManager: ["ipad", "layout"]
+        case .accessibility: ["accessibility"]
+        case .unknownToolFallback, .customRenderer: ["custom", "tool"]
         }
     }
 

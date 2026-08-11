@@ -33,4 +33,19 @@ targets:
         INFOPLIST_KEY_CFBundleDisplayName: AgentChatDemo
         CODE_SIGNING_ALLOWED: NO
     scheme:
-      testTargets: []
+      testTargets:
+        - AgentChatDemoUITests
+
+  AgentChatDemoUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - UITests
+    dependencies:
+      - target: AgentChatDemo
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.jacklvcoder.AgentChatDemoUITests
+        SWIFT_VERSION: 6.0
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: AgentChatDemo

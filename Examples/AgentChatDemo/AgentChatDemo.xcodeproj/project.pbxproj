@@ -14,21 +14,36 @@
 		64C895E19F2786A00D36F8E7 /* DemoScenario.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7781201D8D95C5579C8598DC /* DemoScenario.swift */; };
 		70CE0117FC14906EEEA33A41 /* DemoImageProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = 32B3602CA814A797FFCF34A0 /* DemoImageProvider.swift */; };
 		7FC072246701C65336681759 /* AgentChatTesting in Frameworks */ = {isa = PBXBuildFile; productRef = D73B889A52ACBB8A3C3AD827 /* AgentChatTesting */; };
+		8F1E5D596DF0352785CD15A2 /* AgentChatDemoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 39A47C8AC1DC6504C10CA177 /* AgentChatDemoUITests.swift */; };
 		9B908EA3E4CA05EEEB8DC750 /* ScenarioListViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 957C02EA9EABBF35C4D8F985 /* ScenarioListViewController.swift */; };
 		A7A2832CA02F36E580E1E26B /* DemoWeatherRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7207A3F33EA5E8282DAED115 /* DemoWeatherRenderer.swift */; };
+		B090E611575B64AC0B42BC44 /* DemoDiagnosticsOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = CA837D285426957F35C500CD /* DemoDiagnosticsOverlay.swift */; };
 		BD6DECA1897F55141E30F6F5 /* DemoConversationContainerViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA8FB71431D1CF17A3326DDB /* DemoConversationContainerViewController.swift */; };
 /* End PBXBuildFile section */
 
+/* Begin PBXContainerItemProxy section */
+		3A14B07B61E6891FA3EBEBC4 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 706C71615F0DCBF37E6D072F /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 5E80767FCBC2472F8C336162;
+			remoteInfo = AgentChatDemo;
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
+		23F2620A3D0CB233BD521489 /* AgentChatDemoUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = AgentChatDemoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		2AD4248087DBD29993D68157 /* SceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SceneDelegate.swift; sourceTree = "<group>"; };
 		32B3602CA814A797FFCF34A0 /* DemoImageProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoImageProvider.swift; sourceTree = "<group>"; };
-		34A0D1B9A197163E8C7F6244 /* AgentChatDemo.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AgentChatDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		34A0D1B9A197163E8C7F6244 /* AgentChatDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = AgentChatDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		39A47C8AC1DC6504C10CA177 /* AgentChatDemoUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AgentChatDemoUITests.swift; sourceTree = "<group>"; };
 		5345A8C6FAC4087BA5822267 /* DemoImagePreviewViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoImagePreviewViewController.swift; sourceTree = "<group>"; };
 		6146EB97AF279407422CE922 /* agent-chat-kit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "agent-chat-kit"; path = ../..; sourceTree = SOURCE_ROOT; };
 		7207A3F33EA5E8282DAED115 /* DemoWeatherRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoWeatherRenderer.swift; sourceTree = "<group>"; };
 		7781201D8D95C5579C8598DC /* DemoScenario.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoScenario.swift; sourceTree = "<group>"; };
 		957C02EA9EABBF35C4D8F985 /* ScenarioListViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ScenarioListViewController.swift; sourceTree = "<group>"; };
 		BA8FB71431D1CF17A3326DDB /* DemoConversationContainerViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoConversationContainerViewController.swift; sourceTree = "<group>"; };
+		CA837D285426957F35C500CD /* DemoDiagnosticsOverlay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemoDiagnosticsOverlay.swift; sourceTree = "<group>"; };
 		CA8714D75D2E630CD69DF6A4 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -49,8 +64,17 @@
 			isa = PBXGroup;
 			children = (
 				34A0D1B9A197163E8C7F6244 /* AgentChatDemo.app */,
+				23F2620A3D0CB233BD521489 /* AgentChatDemoUITests.xctest */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		352CCDF6C0A20C6DDDB07A62 /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				39A47C8AC1DC6504C10CA177 /* AgentChatDemoUITests.swift */,
+			);
+			path = UITests;
 			sourceTree = "<group>";
 		};
 		4D8E6A15A2A2BF649AD3D532 /* App */ = {
@@ -58,6 +82,7 @@
 			children = (
 				CA8714D75D2E630CD69DF6A4 /* AppDelegate.swift */,
 				BA8FB71431D1CF17A3326DDB /* DemoConversationContainerViewController.swift */,
+				CA837D285426957F35C500CD /* DemoDiagnosticsOverlay.swift */,
 				5345A8C6FAC4087BA5822267 /* DemoImagePreviewViewController.swift */,
 				957C02EA9EABBF35C4D8F985 /* ScenarioListViewController.swift */,
 				2AD4248087DBD29993D68157 /* SceneDelegate.swift */,
@@ -72,6 +97,7 @@
 				C472F4DFDA4A8F95ADAB1D0A /* CustomRenderers */,
 				602CFF0DA85AD117FDD19C76 /* Packages */,
 				B8DF4D9F67AA4165F9AFFC46 /* Scenarios */,
+				352CCDF6C0A20C6DDDB07A62 /* UITests */,
 				25162492C1882AEB2962A7EB /* Products */,
 			);
 			sourceTree = "<group>";
@@ -124,6 +150,24 @@
 			productReference = 34A0D1B9A197163E8C7F6244 /* AgentChatDemo.app */;
 			productType = "com.apple.product-type.application";
 		};
+		D9DF6BF8655D90B7DC434A2D /* AgentChatDemoUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = C1246FEC854C7AC32E374204 /* Build configuration list for PBXNativeTarget "AgentChatDemoUITests" */;
+			buildPhases = (
+				526E70E14BEC274EB5DC3C1D /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B59BFD2F1A2BEE9FA7760537 /* PBXTargetDependency */,
+			);
+			name = AgentChatDemoUITests;
+			packageProductDependencies = (
+			);
+			productName = AgentChatDemoUITests;
+			productReference = 23F2620A3D0CB233BD521489 /* AgentChatDemoUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -133,6 +177,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1600;
 				TargetAttributes = {
+					D9DF6BF8655D90B7DC434A2D = {
+						TestTargetID = 5E80767FCBC2472F8C336162;
+					};
 				};
 			};
 			buildConfigurationList = EE64AD218F433F7F58AC944A /* Build configuration list for PBXProject "AgentChatDemo" */;
@@ -153,17 +200,27 @@
 			projectRoot = "";
 			targets = (
 				5E80767FCBC2472F8C336162 /* AgentChatDemo */,
+				D9DF6BF8655D90B7DC434A2D /* AgentChatDemoUITests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXSourcesBuildPhase section */
+		526E70E14BEC274EB5DC3C1D /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8F1E5D596DF0352785CD15A2 /* AgentChatDemoUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 		E0671CE6A630114AAC59F4FE /* Sources */ = {
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
 				06BAB8DD1BC5DD3A5BF3C7EA /* AppDelegate.swift in Sources */,
 				BD6DECA1897F55141E30F6F5 /* DemoConversationContainerViewController.swift in Sources */,
+				B090E611575B64AC0B42BC44 /* DemoDiagnosticsOverlay.swift in Sources */,
 				35370C135F3D67388EC08F20 /* DemoImagePreviewViewController.swift in Sources */,
 				70CE0117FC14906EEEA33A41 /* DemoImageProvider.swift in Sources */,
 				64C895E19F2786A00D36F8E7 /* DemoScenario.swift in Sources */,
@@ -174,6 +231,14 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		B59BFD2F1A2BEE9FA7760537 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 5E80767FCBC2472F8C336162 /* AgentChatDemo */;
+			targetProxy = 3A14B07B61E6891FA3EBEBC4 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		0BC150AE919FF615CF7DCD38 /* Debug */ = {
@@ -245,6 +310,7 @@
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = AgentChatDemo;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -316,12 +382,49 @@
 			};
 			name = Release;
 		};
+		96C220F830DC862D912548CB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jacklvcoder.AgentChatDemoUITests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AgentChatDemo;
+			};
+			name = Release;
+		};
+		99E0D8CBEEF0822FCF5067D8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jacklvcoder.AgentChatDemoUITests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = AgentChatDemo;
+			};
+			name = Debug;
+		};
 		BB534C623A625616E34F9032 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
 				CODE_SIGNING_ALLOWED = NO;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = "";
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_KEY_CFBundleDisplayName = AgentChatDemo;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
@@ -340,6 +443,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		C1246FEC854C7AC32E374204 /* Build configuration list for PBXNativeTarget "AgentChatDemoUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				99E0D8CBEEF0822FCF5067D8 /* Debug */,
+				96C220F830DC862D912548CB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		EE64AD218F433F7F58AC944A /* Build configuration list for PBXProject "AgentChatDemo" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (

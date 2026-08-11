@@ -15,10 +15,10 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "5E80767FCBC2472F8C336162"
-               BuildableName = "AgentChatDemo.app"
-               BlueprintName = "AgentChatDemo"
-               ReferencedContainer = "container:AgentChatDemo.xcodeproj">
+               BlueprintIdentifier = "D339872ECA99D3BB22566923"
+               BuildableName = "AgentChatQuickStart.app"
+               BlueprintName = "AgentChatQuickStart"
+               ReferencedContainer = "container:AgentChatQuickStart.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -32,24 +32,13 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5E80767FCBC2472F8C336162"
-            BuildableName = "AgentChatDemo.app"
-            BlueprintName = "AgentChatDemo"
-            ReferencedContainer = "container:AgentChatDemo.xcodeproj">
+            BlueprintIdentifier = "D339872ECA99D3BB22566923"
+            BuildableName = "AgentChatQuickStart.app"
+            BlueprintName = "AgentChatQuickStart"
+            ReferencedContainer = "container:AgentChatQuickStart.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
-         <TestableReference
-            skipped = "NO"
-            parallelizable = "NO">
-            <BuildableReference
-               BuildableIdentifier = "primary"
-               BlueprintIdentifier = "D9DF6BF8655D90B7DC434A2D"
-               BuildableName = "AgentChatDemoUITests.xctest"
-               BlueprintName = "AgentChatDemoUITests"
-               ReferencedContainer = "container:AgentChatDemo.xcodeproj">
-            </BuildableReference>
-         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>
@@ -68,10 +57,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5E80767FCBC2472F8C336162"
-            BuildableName = "AgentChatDemo.app"
-            BlueprintName = "AgentChatDemo"
-            ReferencedContainer = "container:AgentChatDemo.xcodeproj">
+            BlueprintIdentifier = "D339872ECA99D3BB22566923"
+            BuildableName = "AgentChatQuickStart.app"
+            BlueprintName = "AgentChatQuickStart"
+            ReferencedContainer = "container:AgentChatQuickStart.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>
@@ -87,10 +76,10 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "5E80767FCBC2472F8C336162"
-            BuildableName = "AgentChatDemo.app"
-            BlueprintName = "AgentChatDemo"
-            ReferencedContainer = "container:AgentChatDemo.xcodeproj">
+            BlueprintIdentifier = "D339872ECA99D3BB22566923"
+            BuildableName = "AgentChatQuickStart.app"
+            BlueprintName = "AgentChatQuickStart"
+            ReferencedContainer = "container:AgentChatQuickStart.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>

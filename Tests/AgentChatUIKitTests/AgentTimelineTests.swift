@@ -25,6 +25,289 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertEqual(action, .send(text: "Run the interactive demo", attachments: []))
     }
 
+    func testComposerRendersAndRemovesIndividualAttachment() async throws {
+        let attachment = AgentAttachment(
+            id: "image",
+            name: "architecture.png",
+            mediaType: "image/png",
+            byteCount: 42,
+            reference: .localIdentifier("image")
+        )
+        let composer = AgentComposerView()
+        composer.apply(.init(attachments: [attachment]))
+        let actionTask = Task {
+            var iterator = composer.actionStream.makeAsyncIterator()
+            return await iterator.next()
+        }
+        let chip = try XCTUnwrap(
+            composer.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentComposerAttachment.image"
+            }
+        )
+        let remove = try XCTUnwrap(chip.allSubviews.compactMap { $0 as? UIButton }.last)
+
+        remove.sendActions(for: .touchUpInside)
+
+        let action = await actionTask.value
+        XCTAssertEqual(action, .removeAttachment("image"))
+        XCTAssertTrue(composer.currentState.attachments.isEmpty)
+        XCTAssertTrue(
+            composer.allSubviews.allSatisfy {
+                $0.accessibilityIdentifier != "AgentComposerAttachment.image"
+            }
+        )
+    }
+
+    func testComposerRoutesHostDefinedAccessory() async throws {
+        let composer = AgentComposerView()
+        composer.apply(
+            .init(
+                accessories: [
+                    .init(id: "model", title: "GPT-5", systemImageName: "cpu")
+                ]
+            )
+        )
+        let actionTask = Task {
+            var iterator = composer.actionStream.makeAsyncIterator()
+            return await iterator.next()
+        }
+        let button = try XCTUnwrap(
+            composer.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentComposerAccessory.model"
+            } as? UIButton
+        )
+
+        button.sendActions(for: .touchUpInside)
+
+        let action = await actionTask.value
+        XCTAssertEqual(action, .selectAccessory("model"))
+    }
+
+    func testComposerBlocksSubmissionForFailedAttachment() throws {
+        let composer = AgentComposerView()
+        composer.apply(
+            .init(
+                attachments: [
+                    .init(
+                        id: "failed",
+                        name: "failed.pdf",
+                        reference: .localIdentifier("failed")
+                    )
+                ],
+                attachmentStatuses: ["failed": .failed(message: "Upload failed")]
+            )
+        )
+        let sendButton = try XCTUnwrap(
+            composer.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentComposerSendButton"
+            } as? UIButton
+        )
+
+        XCTAssertFalse(sendButton.isEnabled)
+    }
+
+    func testOfflineConversationDisablesComposerSubmission() throws {
+        let store = AgentConversationStore(
+            snapshot: .init(
+                id: "offline",
+                state: .offline(message: "Reconnect to send")
+            )
+        )
+        let controller = AgentConversationViewController(store: store)
+        controller.loadViewIfNeeded()
+        let textView = try XCTUnwrap(
+            controller.view.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentComposerTextView"
+            } as? UITextView
+        )
+        let sendButton = try XCTUnwrap(
+            controller.view.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentComposerSendButton"
+            } as? UIButton
+        )
+
+        textView.text = "Should remain a draft"
+        textView.delegate?.textViewDidChange?(textView)
+
+        XCTAssertFalse(sendButton.isEnabled)
+        let statusLabel =
+            controller.view.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentComposerStatus"
+            } as? UILabel
+        XCTAssertEqual(statusLabel?.text, "Reconnect to send")
+    }
+
+    func testConversationReportsComposerOwnedAttachmentRemoval() async throws {
+        let store = AgentConversationStore(
+            snapshot: .init(id: "attachments", state: .connected)
+        )
+        let controller = AgentConversationViewController(
+            store: store,
+            configuration: .init(runtimeCapabilities: [.attachments])
+        )
+        let delegate = ComposerDelegateSpy()
+        let update = expectation(description: "draft attachment synchronization")
+        delegate.onAttachmentsChanged = { attachments in
+            XCTAssertTrue(attachments.isEmpty)
+            update.fulfill()
+        }
+        controller.delegate = delegate
+        controller.loadViewIfNeeded()
+        controller.setComposerAttachments([
+            .init(
+                id: "draft",
+                name: "draft.txt",
+                mediaType: "text/plain",
+                reference: .localIdentifier("draft")
+            )
+        ])
+        let chip = try XCTUnwrap(
+            controller.view.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentComposerAttachment.draft"
+            }
+        )
+        let remove = try XCTUnwrap(chip.allSubviews.compactMap { $0 as? UIButton }.last)
+
+        remove.sendActions(for: .touchUpInside)
+
+        await fulfillment(of: [update], timeout: 1)
+    }
+
+    func testEveryBuiltInBlockRendersAcrossLifecycleStateMatrix() {
+        let failure = AgentFailure(code: "matrix.failure", message: "Expected failure")
+        let contents: [(AgentBlockKind, AgentBlockContent)] = [
+            (.userText, .userText(.init(text: "User input"))),
+            (
+                .markdown,
+                .markdown(.init(markdown: "| A | B |\n| - | - |\n| 1 | 2 |", isFinal: true))
+            ),
+            (.activity, .activity(.init(title: "Thinking", detail: "Safe summary"))),
+            (
+                .tool,
+                .tool(
+                    .init(
+                        toolName: "demo.tool",
+                        title: "Use demo tool",
+                        input: .object(["input": .string("value")]),
+                        output: .object(["output": .bool(true)])
+                    )
+                )
+            ),
+            (.command, .command(.init(command: "swift test", exitCode: 0))),
+            (
+                .fileSearch,
+                .fileSearch(
+                    .init(
+                        query: "AgentChatKit",
+                        root: "Sources",
+                        matches: [.init(path: "README.md", line: 1)],
+                        totalCount: 1
+                    )
+                )
+            ),
+            (
+                .fileOperation,
+                .fileOperation(.init(operation: .update, path: "README.md", summary: "Updated"))
+            ),
+            (
+                .diff,
+                .diff(
+                    .init(
+                        title: "Change",
+                        rawUnifiedDiff: "@@ -1 +1 @@\n-old\n+new"
+                    )
+                )
+            ),
+            (
+                .approval,
+                .approval(
+                    .init(
+                        approvalID: "approval",
+                        title: "Continue?",
+                        risk: .medium,
+                        choices: [
+                            .init(id: "allow", title: "Allow", role: .approve),
+                            .init(id: "reject", title: "Reject", role: .reject),
+                        ]
+                    )
+                )
+            ),
+            (
+                .artifact,
+                .artifact(
+                    .init(
+                        id: "artifact",
+                        title: "Report",
+                        reference: .runtimeURI("artifact://report")
+                    )
+                )
+            ),
+            (
+                .image,
+                .image(
+                    .init(reference: .localIdentifier("image"), alternativeText: "Preview")
+                )
+            ),
+            (.error, .error(.init(failure: failure))),
+            (
+                "company.custom",
+                .custom(
+                    .init(
+                        kind: "company.custom",
+                        payload: .object(["safe": .bool(true)]),
+                        fallbackTitle: "Custom"
+                    )
+                )
+            ),
+        ]
+        let states: [AgentBlockState] = [
+            .queued,
+            .streaming,
+            .running(progress: nil),
+            .running(progress: 0.5),
+            .waitingForApproval,
+            .succeeded,
+            .failed(failure),
+            .cancelled,
+        ]
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 390, height: 844),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        let registry = AgentBlockRendererRegistry.default
+        registry.registerAll(in: collectionView)
+
+        for (contentIndex, pair) in contents.enumerated() {
+            for (stateIndex, state) in states.enumerated() {
+                let block = AgentBlock(
+                    id: .init(rawValue: "matrix-\(contentIndex)-\(stateIndex)"),
+                    kind: pair.0,
+                    content: pair.1,
+                    state: state,
+                    createdAt: .distantPast
+                )
+                let turn = AgentTurn(
+                    id: .init(rawValue: "turn-\(contentIndex)-\(stateIndex)"),
+                    role: pair.0 == .userText ? .user : .assistant,
+                    blocks: [block],
+                    state: .completed,
+                    createdAt: .distantPast
+                )
+
+                let cell = registry.renderer(for: block).dequeueConfiguredCell(
+                    from: collectionView,
+                    at: .init(item: 0, section: 0),
+                    context: renderContext(turn: turn, block: block)
+                )
+
+                XCTAssertFalse(
+                    cell.contentView.subviews.isEmpty,
+                    "Missing renderer for \(pair.0.rawValue) in state \(state)"
+                )
+            }
+        }
+    }
+
     func testControllerMapsTurnsToSectionsAndBlocksToItems() {
         let date = Date(timeIntervalSince1970: 0)
         let first = AgentTurn(
@@ -564,6 +847,18 @@ private struct FailingImageProvider: AgentImageProviding {
         scale: CGFloat
     ) async throws -> UIImage {
         throw Failure()
+    }
+}
+
+@MainActor
+private final class ComposerDelegateSpy: AgentConversationViewControllerDelegate {
+    var onAttachmentsChanged: (([AgentAttachment]) -> Void)?
+
+    func conversationViewController(
+        _ controller: AgentConversationViewController,
+        didUpdateDraftAttachments attachments: [AgentAttachment]
+    ) {
+        onAttachmentsChanged?(attachments)
     }
 }
 

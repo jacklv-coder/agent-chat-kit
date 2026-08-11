@@ -63,13 +63,16 @@ code, tests, demo path, and documentation are present.
 - [x] Extensible renderer registry and offline custom weather renderer demo
 - [x] Approval buttons disable immediately until runtime confirmation
 - [x] Default multiline composer, Send/Stop, draft and attachment metadata
+- [x] Rich composer attachment upload/retry/removal, host accessories, file paste/import routing,
+  context status, and offline draft preservation
 - [x] Interactive Mock Runtime submit flow with thinking, tools, and streaming Markdown results
 - [x] Whole-row tool disclosure with icon/title/detail structure and animated height changes
 - [x] `keyboardLayoutGuide`, interactive dismissal, and hardware key commands
 - [x] Adaptive iPad content width, Light/Dark semantic theme, Dynamic Type, and VoiceOver labels
 - [x] English and Simplified Chinese String Catalog
 - [ ] Complete context menus, pointer, drag/drop, and remaining rich block behaviors
-- [ ] Snapshot and XCUITest matrices
+- [x] Initial phone/iPad Light/Dark composer snapshots, lifecycle renderer matrix, and Demo XCUITests
+- [ ] Full language, Dynamic Type, rotation, and all-scenario visual regression matrix
 
 ## Phase 8 — Validation and RC (in progress)
 
@@ -90,13 +93,14 @@ code, tests, demo path, and documentation are present.
 
 ## Latest local validation
 
-Validated 2026-08-10 with Xcode 26.6 / Swift 6.3.3:
+Validated 2026-08-11 with Xcode 26.6 / Swift 6.3.3:
 
-- iOS 26.1 iPhone simulator: all package tests passed;
+- iOS 18.2 iPhone simulator: all package suites passed;
+- iOS 18.2 iPhone simulator: four deterministic composer image snapshots passed;
 - generic iOS Simulator: Debug and Release package builds passed;
-- iPad Pro simulator destination: Demo build passed;
+- iPhone 17 Pro simulator: all deterministic Demo XCUITests passed;
+- iPhone and iPad simulators: Demo and complete QuickStart builds passed;
 - Core and integration suites passed locally with Thread Sanitizer enabled;
 - Demo installed and launched successfully on an iPhone simulator;
-- DocC completed; warnings originated from `swift-markdown` 0.8.0 documentation collisions and
-  missing upstream snippets, not AgentChatKit sources.
+- DocC completed without documentation warnings.
 - GitHub Actions run `31400327437` passed all 11 jobs on Xcode 16.4.

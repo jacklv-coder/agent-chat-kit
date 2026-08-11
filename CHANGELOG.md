@@ -12,3 +12,16 @@ All notable changes are documented here. This project follows Semantic Versionin
 - Offline demo and mock runtime foundations.
 - Native compositional timeline foundations with explicit update scheduling and stable-ID scroll
   anchoring; no third-party chat layout dependency.
+- A complete, CI-built QuickStart host with a reference runtime adapter and DocC integration guides.
+- Versioned JSON scenario fixtures, deterministic pause/step/rate playback, runtime event-contract
+  validation, and an in-app Test Lab with diagnostics.
+- Snapshot baselines and Demo XCUITests for rich composer, lifecycle, streaming Markdown, and table
+  rendering paths.
+
+### Changed
+
+- Rebuilt the composer as a host-extensible multiline surface with attachment upload states,
+  retry/removal, paste and document import routing, model/reasoning/workspace accessories, context
+  status, and explicit Send/Stop behavior.
+- Disabled submission while disconnected by default and preserved drafts when runtime submission
+  fails.

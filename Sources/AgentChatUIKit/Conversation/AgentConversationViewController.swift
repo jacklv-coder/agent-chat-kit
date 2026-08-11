@@ -59,6 +59,14 @@ public final class AgentConversationViewController: UIViewController {
         )
         self.composer = AgentComposerView(maximumHeight: configuration.maximumComposerHeight)
         super.init(nibName: nil, bundle: nil)
+        self.composer.importHandler = { [weak self] providers, sourceView in
+            guard let self else { return }
+            self.delegate?.conversationViewController(
+                self,
+                didPaste: providers,
+                sourceView: sourceView
+            )
+        }
     }
 
     @available(*, unavailable)
@@ -131,6 +139,28 @@ public final class AgentConversationViewController: UIViewController {
     public func setComposerAttachments(_ attachments: [AgentAttachment]) {
         var state = currentComposerState()
         state.attachments = attachments
+        state.attachmentStatuses = state.attachmentStatuses.filter { id, _ in
+            attachments.contains { $0.id == id }
+        }
+        composer.apply(state)
+    }
+
+    /// Replaces upload or validation state for one pending attachment.
+    public func setComposerAttachmentStatus(
+        _ status: AgentComposerAttachmentStatus,
+        for attachmentID: AgentAttachmentID
+    ) {
+        var state = currentComposerState()
+        guard state.attachments.contains(where: { $0.id == attachmentID }) else { return }
+        state.attachmentStatuses[attachmentID] = status
+        composer.apply(state)
+    }
+
+    /// Replaces host-defined default composer controls.
+    public func setComposerAccessories(_ accessories: [AgentComposerAccessory]) {
+        configuration.composerAccessories = accessories
+        var state = currentComposerState()
+        state.accessories = accessories
         composer.apply(state)
     }
 
@@ -543,15 +573,24 @@ public final class AgentConversationViewController: UIViewController {
                 text: text,
                 attachments: attachments
             )
-            composer.apply(.init(isRunning: true))
+            var submittedState = pendingState
+            submittedState.text = ""
+            submittedState.attachments = []
+            submittedState.attachmentStatuses = [:]
+            submittedState.isRunning = configuration.runtimeCapabilities.contains(.interrupt)
+            submittedState.canSend = false
+            submittedState.statusMessage = AgentStrings.running
+            composer.apply(submittedState)
+            delegate?.conversationViewController(self, didUpdateDraftAttachments: [])
             perform(
                 .runtime(.submit(request)),
-                success: { [weak self] in
-                    guard let self else { return }
-                    self.composer.apply(.init(isRunning: self.isConversationRunning))
-                },
                 failure: { [weak self] in
-                    self?.composer.apply(pendingState)
+                    guard let self else { return }
+                    self.composer.apply(pendingState)
+                    self.delegate?.conversationViewController(
+                        self,
+                        didUpdateDraftAttachments: pendingState.attachments
+                    )
                 }
             )
         case .stop:
@@ -562,6 +601,29 @@ public final class AgentConversationViewController: UIViewController {
         case .pickAttachments:
             guard configuration.runtimeCapabilities.contains(.attachments) else { return }
             delegate?.conversationViewControllerDidRequestAttachments(self, sourceView: composer)
+        case .removeAttachment(let attachmentID):
+            var state = currentComposerState()
+            state.attachments.removeAll { $0.id == attachmentID }
+            state.attachmentStatuses[attachmentID] = nil
+            composer.apply(state)
+            delegate?.conversationViewController(
+                self,
+                didUpdateDraftAttachments: state.attachments
+            )
+        case .retryAttachment(let attachmentID):
+            delegate?.conversationViewController(
+                self,
+                didRequestRetryFor: attachmentID
+            )
+        case .selectAccessory(let id):
+            perform(
+                .host(
+                    .custom(
+                        kind: "agentchat.composer.accessory",
+                        payload: .object(["id": .string(id)])
+                    )
+                )
+            )
         }
     }
 
@@ -611,14 +673,33 @@ public final class AgentConversationViewController: UIViewController {
 
     private func updateComposerState() {
         var state = currentComposerState()
-        state.isRunning = isConversationRunning
-        state.canSend = true
+        let canInterrupt = configuration.runtimeCapabilities.contains(.interrupt)
+        state.isRunning = isConversationRunning && canInterrupt
+        state.canPickAttachments = configuration.runtimeCapabilities.contains(.attachments)
+        state.accessories = configuration.composerAccessories
+        state.contextDescription = configuration.composerContextDescription
+        switch store.snapshot.state {
+        case .connected, .idle:
+            state.statusMessage = isConversationRunning ? AgentStrings.running : nil
+            state.canSend = !isConversationRunning
+        case .connecting:
+            state.statusMessage = AgentStrings.connecting
+            state.canSend = false
+        case .offline(let message):
+            state.statusMessage = message ?? AgentStrings.offline
+            state.canSend = configuration.allowsSendingWhileOffline && !isConversationRunning
+        case .failed(let failure):
+            state.statusMessage = failure.message
+            state.canSend = false
+        }
         composer.apply(state)
     }
 
     private func currentComposerState() -> AgentComposerState {
         var state = composer.currentState
-        state.isRunning = isConversationRunning
+        state.isRunning =
+            isConversationRunning
+            && configuration.runtimeCapabilities.contains(.interrupt)
         return state
     }
 

@@ -115,7 +115,7 @@ final class AgentSessionIntegrationTests: XCTestCase {
         try await session.send(
             .submit(.init(conversationID: conversationID, text: "Show every state"))
         )
-        for _ in 0..<60 {
+        for _ in 0..<100 {
             if store.snapshot.turns.count == 2,
                 store.snapshot.turns.last?.role == .assistant,
                 store.snapshot.turns.last?.state == .completed

@@ -33,6 +33,10 @@ enum AgentStrings {
     static var send: String { String(localized: "Send", bundle: .module) }
     static var stop: String { String(localized: "Stop", bundle: .module) }
     static var attach: String { String(localized: "Attach", bundle: .module) }
+    static var uploading: String { String(localized: "Uploading", bundle: .module) }
+    static var removeAttachment: String {
+        String(localized: "Remove attachment", bundle: .module)
+    }
     static var jumpToLatest: String { String(localized: "Jump to latest", bundle: .module) }
     static var offline: String { String(localized: "Offline", bundle: .module) }
     static var connecting: String { String(localized: "Connecting", bundle: .module) }

@@ -175,6 +175,12 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "已读取" } }
       }
     },
+    "Remove attachment" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Remove attachment" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "移除附件" } }
+      }
+    },
     "Retry" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Retry" } },
@@ -221,6 +227,12 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "System" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "系统" } }
+      }
+    },
+    "Uploading" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Uploading" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在上传" } }
       }
     },
     "Waiting for approval" : {
