@@ -17,6 +17,7 @@ public final class AgentConversationViewController: UIViewController {
     private let composer: AgentComposerView
     private let connectionBanner = UILabel()
     private let jumpToLatestButton = UIButton(type: .system)
+    private let historyLoadingIndicator = UIActivityIndicatorView(style: .medium)
     private let sizeCache = AgentItemSizeCache()
 
     private var dataSource: UICollectionViewDiffableDataSource<AgentTurnID, AgentBlockID>!
@@ -28,6 +29,7 @@ public final class AgentConversationViewController: UIViewController {
     private var initializedExpansionBlockIDs: Set<AgentBlockID> = []
     private var resolvingApprovalIDs: Set<AgentApprovalID> = []
     private var isLoadingHistory = false
+    private var isHistoryRequestArmed = false
     private var previousViewSize: CGSize = .zero
     private var pendingGeometryAnchor: AgentLayoutAnchor?
     private var bannerHeightConstraint: NSLayoutConstraint?
@@ -219,6 +221,7 @@ public final class AgentConversationViewController: UIViewController {
         collectionView.keyboardDismissMode = .interactive
         collectionView.delegate = self
         collectionView.contentInsetAdjustmentBehavior = .always
+        collectionView.accessibilityIdentifier = "AgentConversationTimeline"
 
         connectionBanner.translatesAutoresizingMaskIntoConstraints = false
         connectionBanner.font = .preferredFont(forTextStyle: .subheadline)
@@ -228,6 +231,7 @@ public final class AgentConversationViewController: UIViewController {
         connectionBanner.backgroundColor = .systemYellow.withAlphaComponent(0.22)
         connectionBanner.textColor = .label
         connectionBanner.isHidden = true
+        connectionBanner.accessibilityIdentifier = "AgentConversationConnectionBanner"
         bannerHeightConstraint = connectionBanner.heightAnchor.constraint(equalToConstant: 0)
         bannerHeightConstraint?.isActive = true
 
@@ -241,6 +245,7 @@ public final class AgentConversationViewController: UIViewController {
         jumpToLatestButton.configuration = jumpConfiguration
         jumpToLatestButton.translatesAutoresizingMaskIntoConstraints = false
         jumpToLatestButton.isHidden = true
+        jumpToLatestButton.accessibilityIdentifier = "AgentConversationJumpToLatestButton"
         jumpToLatestButton.addAction(
             UIAction { [weak self] _ in
                 guard let self else { return }
@@ -251,9 +256,14 @@ public final class AgentConversationViewController: UIViewController {
             for: .touchUpInside
         )
 
+        historyLoadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        historyLoadingIndicator.hidesWhenStopped = true
+        historyLoadingIndicator.accessibilityIdentifier = "AgentHistoryLoadingIndicator"
+
         view.addSubview(connectionBanner)
         view.addSubview(collectionView)
         view.addSubview(composer)
+        view.addSubview(historyLoadingIndicator)
         view.addSubview(jumpToLatestButton)
         view.keyboardLayoutGuide.followsUndockedKeyboard = true
 
@@ -282,6 +292,11 @@ public final class AgentConversationViewController: UIViewController {
                 constant: -16
             ),
             jumpToLatestButton.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -10),
+            historyLoadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            historyLoadingIndicator.topAnchor.constraint(
+                equalTo: collectionView.topAnchor,
+                constant: 10
+            ),
         ])
     }
 
@@ -391,7 +406,7 @@ public final class AgentConversationViewController: UIViewController {
             case .activity: return .contentOnly
             default: return .sizeAffecting
             }
-        case .reconfigureTurn, .conversationStateChanged, .notice:
+        case .reconfigureTurn, .historyStateChanged, .conversationStateChanged, .notice:
             return .contentOnly
         }
     }
@@ -400,6 +415,12 @@ public final class AgentConversationViewController: UIViewController {
         updateConnectionBanner()
         updateComposerState()
         cleanupResolvedApprovalState()
+        if update.patches.contains(where: { patch in
+            if case .historyStateChanged = patch { return true }
+            return false
+        }) {
+            setHistoryLoading(false)
+        }
 
         if update.requiresStructuralReconciliation {
             let isPrepend = update.patches.contains { patch in
@@ -411,7 +432,7 @@ public final class AgentConversationViewController: UIViewController {
                 ? scrollCoordinator.beginHistoryPrepend()
                 : (scrollCoordinator.isFollowingLatest
                     ? nil : scrollCoordinator.captureAnchor(edge: .top))
-            let shouldFollow = scrollCoordinator.isFollowingLatest
+            let shouldFollow = scrollCoordinator.shouldAutomaticallyFollowLatest
             let insertedCount = update.patches.reduce(into: 0) { count, patch in
                 switch patch {
                 case .insertBlock, .insertTurn: count += 1
@@ -426,7 +447,6 @@ public final class AgentConversationViewController: UIViewController {
             if !shouldFollow, insertedCount > 0 {
                 scrollCoordinator.receivedNewContent(count: insertedCount)
             }
-            if isPrepend { isLoadingHistory = false }
             return
         }
 
@@ -453,7 +473,7 @@ public final class AgentConversationViewController: UIViewController {
             self.collectionView.layoutIfNeeded()
             if let anchor {
                 self.scrollCoordinator.restore(anchor)
-            } else if self.scrollCoordinator.isFollowingLatest {
+            } else if self.scrollCoordinator.shouldAutomaticallyFollowLatest {
                 self.scrollCoordinator.scrollToLatest(animated: false)
             }
         }
@@ -675,6 +695,7 @@ public final class AgentConversationViewController: UIViewController {
         var state = currentComposerState()
         let canInterrupt = configuration.runtimeCapabilities.contains(.interrupt)
         state.isRunning = isConversationRunning && canInterrupt
+        scrollCoordinator.setStreaming(isConversationRunning)
         state.canPickAttachments = configuration.runtimeCapabilities.contains(.attachments)
         state.accessories = configuration.composerAccessories
         state.contextDescription = configuration.composerContextDescription
@@ -727,6 +748,28 @@ public final class AgentConversationViewController: UIViewController {
             : AgentStrings.jumpToLatest
     }
 
+    private func setHistoryLoading(_ isLoading: Bool) {
+        isLoadingHistory = isLoading
+        if isLoading {
+            historyLoadingIndicator.startAnimating()
+        } else {
+            historyLoadingIndicator.stopAnimating()
+        }
+    }
+
+    private func finishScrollInteraction() {
+        isHistoryRequestArmed = false
+        scrollCoordinator.userDidEndInteraction()
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + AgentScrollPolicy.userInteractionCooldown + 0.01
+        ) { [weak self] in
+            guard let self, self.scrollCoordinator.shouldAutomaticallyFollowLatest else { return }
+            // A final height update may have landed during the cooldown. Reconcile once
+            // after direct manipulation without overriding a newer history-reading intent.
+            self.scrollCoordinator.scrollToLatest(animated: false)
+        }
+    }
+
     private func showConnectionBanner() {
         bannerHeightConstraint?.isActive = false
         connectionBanner.isHidden = false
@@ -766,7 +809,7 @@ public final class AgentConversationViewController: UIViewController {
                 self.collectionView.layoutIfNeeded()
                 if let anchor {
                     self.scrollCoordinator.restore(anchor)
-                } else if self.scrollCoordinator.isFollowingLatest {
+                } else if self.scrollCoordinator.shouldAutomaticallyFollowLatest {
                     self.scrollCoordinator.scrollToLatest(animated: false)
                 }
             }
@@ -852,6 +895,7 @@ public final class AgentConversationViewController: UIViewController {
 
 extension AgentConversationViewController: UICollectionViewDelegate {
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        isHistoryRequestArmed = true
         scrollCoordinator.userWillBeginDragging()
     }
 
@@ -859,12 +903,14 @@ extension AgentConversationViewController: UICollectionViewDelegate {
         scrollCoordinator.userDidScroll()
         let topThreshold = -scrollView.adjustedContentInset.top + 160
         if scrollView.contentOffset.y <= topThreshold,
+            isHistoryRequestArmed,
             store.snapshot.hasEarlierHistory,
             configuration.runtimeCapabilities.contains(.history),
             !isLoadingHistory,
             actionHandler != nil
         {
-            isLoadingHistory = true
+            isHistoryRequestArmed = false
+            setHistoryLoading(true)
             perform(
                 .runtime(
                     .loadEarlier(
@@ -873,7 +919,10 @@ extension AgentConversationViewController: UICollectionViewDelegate {
                             cursor: store.snapshot.earlierHistoryCursor
                         )
                     )
-                )
+                ),
+                failure: { [weak self] in
+                    self?.setHistoryLoading(false)
+                }
             )
         }
     }
@@ -881,11 +930,11 @@ extension AgentConversationViewController: UICollectionViewDelegate {
     public func scrollViewDidEndDragging(
         _ scrollView: UIScrollView, willDecelerate decelerate: Bool
     ) {
-        if !decelerate { scrollCoordinator.userDidEndInteraction() }
+        if !decelerate { finishScrollInteraction() }
     }
 
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        scrollCoordinator.userDidEndInteraction()
+        finishScrollInteraction()
     }
 
     public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {

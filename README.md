@@ -86,21 +86,29 @@ xcodebuild -project AgentChatDemo.xcodeproj -scheme AgentChatDemo \
   -destination 'platform=iOS Simulator,name=iPhone 16' build
 ```
 
-The Demo contains all normative scenario entries, a complete cell showcase that combines every
-built-in block, and a current-conversation replay for checking realistic Chinese Markdown, tables,
-trees, long-message layout, and sanitized tool-activity cells for commands, image inspection, file
-edits, skills, and host integrations. Tool activity uses compact icon-and-summary rows with
+The Demo opens on **Complete Conversation**, a production-shaped message-list page with recent
+history, cursor pagination, user and assistant turns, tool activity, Markdown, a working composer,
+and a deterministic streamed response. The Test Lab remains available from the navigation menu and
+contains all normative scenarios, including a complete cell showcase and a current-conversation
+replay for checking realistic Chinese Markdown, tables, trees, long-message layout, and sanitized
+tool activity for commands, image inspection, file edits, skills, and host integrations. Tool
+activity uses compact icon-and-summary rows with
 whole-row expandable details and animated height changes. Expanded image activity resolves a
 thumbnail through the injected `AgentImageProviding`; tapping it opens the Demo's full-screen
 pan-and-zoom preview. Markdown tables use a native, accessible grid with horizontal scrolling when
-needed. Submitting composer text produces an offline sequence of thinking, file search, command,
-file-read, and streaming Markdown events. The Demo never performs model, network, shell, or
-filesystem work. Its Test Lab menu can play, pause, single-step, reset, change replay speed, and copy
-a versioned scenario JSON fixture. The same fixture format is consumed by `AgentChatTesting`.
+needed. The timeline follows streaming output only while the reader owns the latest position,
+preserves a stable visible anchor when older history is prepended, and exposes Jump to Latest after
+manual reading. Submitting composer text produces an offline sequence of thinking, file search,
+command, file-read, and streaming Markdown events. The Demo never performs model, network, shell,
+or filesystem work. Complete Conversation includes a one-tap sample response. Test Lab reports live
+playback state, resumes or single-steps paused fixtures, replays from the beginning, resets into a
+paused state, changes replay speed, and copies a versioned scenario JSON fixture. The same fixture
+format is consumed by `AgentChatTesting`.
 
 ## Integration documentation
 
 - [Getting started](Sources/AgentChatKit/AgentChatKit.docc/GettingStarted.md)
+- [Complete conversation experience](Sources/AgentChatKit/AgentChatKit.docc/ConversationExperience.md)
 - [Runtime adapter contract](Sources/AgentChatKit/AgentChatKit.docc/RuntimeAdapter.md)
 - [Composer integration](Sources/AgentChatKit/AgentChatKit.docc/ComposerIntegration.md)
 - [Deterministic testing scenarios](Sources/AgentChatKit/AgentChatKit.docc/TestingScenarios.md)

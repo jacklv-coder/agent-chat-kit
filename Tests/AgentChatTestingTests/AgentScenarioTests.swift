@@ -17,7 +17,15 @@ final class AgentScenarioTests: XCTestCase {
             title: "Basic Streaming",
             summary: "A portable fixture",
             tags: ["streaming"],
-            scenario: .init(events: [.init(event: event)])
+            scenario: .init(
+                events: [.init(event: event)],
+                historyPages: [
+                    "older": .init(
+                        turns: [],
+                        hasEarlierHistory: false
+                    )
+                ]
+            )
         )
 
         let data = try document.encodedJSON()
@@ -25,6 +33,7 @@ final class AgentScenarioTests: XCTestCase {
 
         XCTAssertEqual(decoded, document)
         XCTAssertTrue(String(decoding: data, as: UTF8.self).contains("basic-streaming"))
+        XCTAssertNotNil(decoded.scenario.historyPage(for: "older"))
     }
 
     func testScenarioDocumentRejectsUnknownSchema() throws {
@@ -42,6 +51,16 @@ final class AgentScenarioTests: XCTestCase {
                 .unsupportedSchemaVersion(999)
             )
         }
+    }
+
+    func testEventOnlyScenarioJSONRemainsDecodable() throws {
+        let scenario = try JSONDecoder().decode(
+            AgentScenario.self,
+            from: Data(#"{"events":[]}"#.utf8)
+        )
+
+        XCTAssertTrue(scenario.events.isEmpty)
+        XCTAssertTrue(scenario.historyPages.isEmpty)
     }
 
     func testPausedPlaybackReleasesExactlyOneStep() async throws {
@@ -70,6 +89,25 @@ final class AgentScenarioTests: XCTestCase {
 
         let state = await controller.state()
         XCTAssertLessThan(start.duration(to: .now), .milliseconds(200))
+        XCTAssertEqual(state.emittedEventCount, 1)
+    }
+
+    func testPauseDuringDelayHoldsEventUntilResume() async throws {
+        let controller = AgentScenarioPlaybackController(rate: 1)
+        let release = Task {
+            try await controller.waitForTest(delayNanoseconds: 250_000_000)
+        }
+        try await Task.sleep(nanoseconds: 50_000_000)
+        await controller.pause()
+        try await Task.sleep(nanoseconds: 300_000_000)
+
+        var state = await controller.state()
+        XCTAssertTrue(state.isPaused)
+        XCTAssertEqual(state.emittedEventCount, 0)
+
+        await controller.resume()
+        try await release.value
+        state = await controller.state()
         XCTAssertEqual(state.emittedEventCount, 1)
     }
 

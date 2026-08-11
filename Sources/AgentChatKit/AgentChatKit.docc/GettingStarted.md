@@ -19,6 +19,12 @@ xcodebuild -project AgentChatQuickStart.xcodeproj \
 
 The QuickStart is built in CI so its setup cannot silently drift away from the public API.
 
+For a product-shaped reference, run `Examples/AgentChatDemo`. It launches directly into Complete
+Conversation: a full timeline, cursor-backed history, streaming tool activity, Markdown, connection
+state, Jump to Latest, and the default rich composer. Open Test Lab from the navigation menu when
+you need isolated renderer and lifecycle fixtures. See <doc:ConversationExperience> for the page
+contract.
+
 ## Add the package
 
 Add this repository as a Swift Package and link the `AgentChatKit` product. Create one store and one
@@ -43,6 +49,10 @@ conversation.actionHandler = { action in
 }
 Task { try await session.start() }
 ```
+
+Embed `conversation` as an ordinary child or navigation destination. Keep your conversation list,
+account state, runtime choice, persistence, and deep-link routing outside the SDK; pass only the
+selected conversation's store, session, capabilities, and host actions into this page.
 
 `ReferenceRuntimeAdapter` is the complete implementation in `Examples/QuickStart`. Copy it first,
 then replace only its offline response logic with your SSE, WebSocket, or local-agent transport.

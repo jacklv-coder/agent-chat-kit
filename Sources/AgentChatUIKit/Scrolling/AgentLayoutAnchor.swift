@@ -12,6 +12,5 @@ enum AgentScrollMode: Hashable {
     case followingLatest
     case readingHistory(anchor: AgentLayoutAnchor?)
     case restoringAfterHistoryPrepend(AgentLayoutAnchor)
-    case programmaticNavigation(target: AgentBlockID)
     case userInteracting
 }

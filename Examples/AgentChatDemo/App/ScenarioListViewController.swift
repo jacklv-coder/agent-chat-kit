@@ -4,9 +4,8 @@ import UIKit
 final class ScenarioListViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = "AgentChatKit"
-        navigationItem.largeTitleDisplayMode = .always
-        navigationController?.navigationBar.prefersLargeTitles = true
+        title = "Test Lab"
+        navigationItem.largeTitleDisplayMode = .never
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "scenario")
     }
 
@@ -26,6 +25,7 @@ final class ScenarioListViewController: UITableViewController {
         content.secondaryTextProperties.numberOfLines = 2
         cell.contentConfiguration = content
         cell.accessoryType = .disclosureIndicator
+        cell.accessibilityIdentifier = "AgentChatDemoScenario.\(scenario.identifier)"
         return cell
     }
 

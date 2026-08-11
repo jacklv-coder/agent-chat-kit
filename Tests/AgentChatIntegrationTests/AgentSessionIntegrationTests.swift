@@ -106,6 +106,91 @@ final class AgentSessionIntegrationTests: XCTestCase {
         await connection.close()
     }
 
+    func testMockRuntimeReturnsConfiguredHistoryPage() async throws {
+        let conversationID: AgentConversationID = "history"
+        let date = Date(timeIntervalSince1970: 0)
+        let olderTurn = AgentTurn(
+            id: "older-turn",
+            role: .assistant,
+            blocks: [
+                .init(
+                    id: "older-block",
+                    kind: .markdown,
+                    content: .markdown(.init(markdown: "Older page", isFinal: true)),
+                    state: .succeeded,
+                    createdAt: date
+                )
+            ],
+            state: .completed,
+            createdAt: date,
+            completedAt: date
+        )
+        let playback = AgentScenarioPlaybackController(rate: 0)
+        let runtime = MockAgentRuntime(
+            scenario: .init(
+                events: [],
+                historyPages: [
+                    "cursor": .init(turns: [olderTurn], hasEarlierHistory: false)
+                ]
+            ),
+            playbackController: playback
+        )
+        let store = AgentConversationStore(snapshot: .empty(conversationID: conversationID))
+        let session = AgentChatSession(
+            adapter: runtime,
+            configuration: .init(conversationID: conversationID),
+            store: store
+        )
+        try await session.start()
+
+        try await session.send(
+            .loadEarlier(
+                .init(conversationID: conversationID, cursor: "cursor")
+            )
+        )
+        try await waitForState {
+            store.snapshot.turns.first?.id == olderTurn.id
+        }
+
+        XCTAssertEqual(store.snapshot.turns, [olderTurn])
+        XCTAssertFalse(store.snapshot.hasEarlierHistory)
+        await session.stop()
+    }
+
+    func testMockRuntimeFinishesUnknownHistoryCursorWithEmptyPage() async throws {
+        let conversationID: AgentConversationID = "missing-history"
+        let runtime = MockAgentRuntime(
+            scenario: .init(events: []),
+            playbackController: .init(rate: 0)
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(
+                id: conversationID,
+                earlierHistoryCursor: "missing",
+                hasEarlierHistory: true
+            )
+        )
+        let session = AgentChatSession(
+            adapter: runtime,
+            configuration: .init(conversationID: conversationID),
+            store: store
+        )
+        try await session.start()
+
+        try await session.send(
+            .loadEarlier(
+                .init(conversationID: conversationID, cursor: "missing")
+            )
+        )
+        try await waitForState {
+            !store.snapshot.hasEarlierHistory
+        }
+
+        XCTAssertTrue(store.snapshot.turns.isEmpty)
+        XCTAssertNil(store.snapshot.earlierHistoryCursor)
+        await session.stop()
+    }
+
     func testSubmittedMessageProducesThinkingToolsAndStreamingMarkdown() async throws {
         let conversationID: AgentConversationID = "interactive"
         let runtime = MockAgentRuntime(scenario: .init(events: []))

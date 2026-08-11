@@ -32,7 +32,9 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                 playbackController: playback
             )
         } else {
-            rootController = ScenarioListViewController()
+            rootController = DemoConversationContainerViewController(
+                scenario: .completeConversation
+            )
         }
         window.rootViewController = UINavigationController(rootViewController: rootController)
         window.makeKeyAndVisible()

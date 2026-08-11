@@ -105,7 +105,7 @@ final class AgentUpdateScheduler {
 
     private func isCritical(_ patch: AgentPresentationPatch) -> Bool {
         switch patch {
-        case .conversationStateChanged, .notice, .reconfigureTurn: true
+        case .conversationStateChanged, .historyStateChanged, .notice, .reconfigureTurn: true
         default: false
         }
     }

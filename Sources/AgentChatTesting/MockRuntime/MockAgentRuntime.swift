@@ -255,6 +255,18 @@ private actor MockConnectionController {
                 payload: .turnUpdated(lastTurn)
             )
 
+        case .loadEarlier(let request):
+            let page =
+                scenario.historyPage(for: request.cursor)
+                ?? AgentHistoryPage(turns: [], hasEarlierHistory: false)
+            try await playbackController.waitBeforeEmission(
+                delayNanoseconds: 300_000_000
+            )
+            await emitGenerated(
+                conversationID: request.conversationID,
+                payload: .historyPage(page)
+            )
+
         default:
             break
         }

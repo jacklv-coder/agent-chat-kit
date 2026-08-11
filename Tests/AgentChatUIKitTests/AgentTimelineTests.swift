@@ -739,6 +739,112 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertEqual(received?.patches.count, 2)
     }
 
+    func testScrollPolicyUsesStreamingToleranceAndInteractionCooldown() {
+        XCTAssertTrue(
+            AgentScrollPolicy.isNearBottom(
+                distanceFromBottom: 120,
+                followingThreshold: 80,
+                isStreaming: true
+            )
+        )
+        XCTAssertFalse(
+            AgentScrollPolicy.isNearBottom(
+                distanceFromBottom: 120,
+                followingThreshold: 80,
+                isStreaming: false
+            )
+        )
+
+        let now = Date(timeIntervalSince1970: 100)
+        let deadline = AgentScrollPolicy.cooldownDeadline(after: now)
+        XCTAssertTrue(
+            AgentScrollPolicy.isAutomaticFollowPaused(
+                isUserInteracting: false,
+                cooldownUntil: deadline,
+                now: now.addingTimeInterval(0.1)
+            )
+        )
+        XCTAssertFalse(
+            AgentScrollPolicy.isAutomaticFollowPaused(
+                isUserInteracting: false,
+                cooldownUntil: deadline,
+                now: now.addingTimeInterval(0.3)
+            )
+        )
+    }
+
+    func testScrollCoordinatorPausesFollowBrieflyAfterManualInteraction() {
+        let collectionView = UICollectionView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 180),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "cell")
+        var dataSource: UICollectionViewDiffableDataSource<Int, AgentBlockID>!
+        dataSource = .init(collectionView: collectionView) { collectionView, indexPath, _ in
+            collectionView.dequeueReusableCell(withReuseIdentifier: "cell", for: indexPath)
+        }
+        var snapshot = NSDiffableDataSourceSnapshot<Int, AgentBlockID>()
+        snapshot.appendSections([0])
+        snapshot.appendItems((0..<12).map { .init(rawValue: "cooldown-block-\($0)") })
+        dataSource.apply(snapshot, animatingDifferences: false)
+        collectionView.layoutIfNeeded()
+        collectionView.contentOffset.y = max(
+            0,
+            collectionView.contentSize.height - collectionView.bounds.height
+        )
+
+        let coordinator = AgentScrollCoordinator(
+            collectionView: collectionView,
+            followingThreshold: 80,
+            itemIdentifier: { dataSource.itemIdentifier(for: $0) },
+            indexPath: { dataSource.indexPath(for: $0) },
+            orderedBlockIDs: { dataSource.snapshot().itemIdentifiers }
+        )
+        let now = Date(timeIntervalSince1970: 100)
+        coordinator.userWillBeginDragging()
+        coordinator.userDidEndInteraction(now: now)
+
+        XCTAssertTrue(coordinator.isFollowingLatest)
+        XCTAssertFalse(coordinator.canAutomaticallyFollowLatest(at: now.addingTimeInterval(0.1)))
+        XCTAssertTrue(coordinator.canAutomaticallyFollowLatest(at: now.addingTimeInterval(0.3)))
+    }
+
+    func testJumpToLatestImmediatelyOwnsFollowIntentDuringStreamingGrowth() {
+        let collectionView = UICollectionView(
+            frame: CGRect(x: 0, y: 0, width: 320, height: 180),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "cell")
+        var dataSource: UICollectionViewDiffableDataSource<Int, AgentBlockID>!
+        dataSource = .init(collectionView: collectionView) { collectionView, indexPath, _ in
+            collectionView.dequeueReusableCell(withReuseIdentifier: "cell", for: indexPath)
+        }
+        var snapshot = NSDiffableDataSourceSnapshot<Int, AgentBlockID>()
+        snapshot.appendSections([0])
+        snapshot.appendItems((0..<12).map { .init(rawValue: "jump-block-\($0)") })
+        dataSource.apply(snapshot, animatingDifferences: false)
+        collectionView.layoutIfNeeded()
+
+        let coordinator = AgentScrollCoordinator(
+            collectionView: collectionView,
+            followingThreshold: 80,
+            itemIdentifier: { dataSource.itemIdentifier(for: $0) },
+            indexPath: { dataSource.indexPath(for: $0) },
+            orderedBlockIDs: { dataSource.snapshot().itemIdentifiers }
+        )
+        collectionView.contentOffset.y = 0
+        coordinator.userWillBeginDragging()
+        coordinator.userDidEndInteraction()
+        coordinator.receivedNewContent(count: 2)
+        XCTAssertEqual(coordinator.unreadCount, 2)
+
+        coordinator.scrollToLatest(animated: true)
+
+        XCTAssertTrue(coordinator.isFollowingLatest)
+        XCTAssertTrue(coordinator.shouldAutomaticallyFollowLatest)
+        XCTAssertEqual(coordinator.unreadCount, 0)
+    }
+
     func testScrollAnchorSurvivesPrependAndDeletedTargetFallsBack() {
         let collectionView = UICollectionView(
             frame: CGRect(x: 0, y: 0, width: 320, height: 180),

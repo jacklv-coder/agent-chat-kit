@@ -2,12 +2,32 @@ import XCTest
 
 @MainActor
 final class AgentChatDemoUITests: XCTestCase {
-    private func makeApp(scenario: String = "complete-cell-showcase") -> XCUIApplication {
+    private func makeDefaultApp() -> XCUIApplication {
+        XCUIApplication()
+    }
+
+    private func makeApp(
+        scenario: String = "complete-cell-showcase",
+        playbackMode: String = "instant"
+    ) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["--agentchat-uitest"]
         app.launchEnvironment["AGENTCHAT_SCENARIO"] = scenario
-        app.launchEnvironment["AGENTCHAT_PLAYBACK_MODE"] = "instant"
+        app.launchEnvironment["AGENTCHAT_PLAYBACK_MODE"] = playbackMode
         return app
+    }
+
+    func testDefaultLaunchOpensCompleteConversationExperience() {
+        continueAfterFailure = false
+        let app = makeDefaultApp()
+        app.launch()
+
+        XCTAssertTrue(app.navigationBars["Complete Conversation"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            app.collectionViews["AgentConversationTimeline"].waitForExistence(timeout: 10)
+        )
+        XCTAssertTrue(app.textViews["AgentComposerTextView"].exists)
+        XCTAssertTrue(app.buttons["AgentChatDemoTestLab"].exists)
     }
 
     func testComposerAcceptsTouchInputAndStreamsAResponse() {
@@ -54,6 +74,139 @@ final class AgentChatDemoUITests: XCTestCase {
         XCTAssertTrue(app.buttons["AgentComposerAccessory.model"].exists)
         XCTAssertTrue(app.buttons["AgentComposerAccessory.reasoning"].exists)
         XCTAssertTrue(app.buttons["AgentComposerAccessory.workspace"].exists)
+
+        app.buttons["AgentChatDemoTestLab"].tap()
+        let browse = app.buttons["Browse All Scenarios"]
+        XCTAssertTrue(browse.waitForExistence(timeout: 5))
+        browse.tap()
+        XCTAssertTrue(app.navigationBars["Test Lab"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.cells["AgentChatDemoScenario.complete-conversation"].exists)
+        XCTAssertTrue(app.cells["AgentChatDemoScenario.complete-cell-showcase"].exists)
+    }
+
+    func testCompletedPlaybackShowsStateAndRunsSampleResponse() {
+        continueAfterFailure = false
+        let app = makeApp(scenario: "complete-conversation")
+        app.launch()
+        XCTAssertTrue(app.staticTexts["完整会话体验"].waitForExistence(timeout: 10))
+
+        let lab = app.buttons["AgentChatDemoTestLab"]
+        XCTAssertTrue(lab.waitForExistence(timeout: 10))
+        lab.tap()
+
+        let status = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "Playback: Completed")
+        ).firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+        XCTAssertFalse(app.buttons["Resume"].isEnabled)
+        XCTAssertFalse(app.buttons["Pause"].isEnabled)
+        XCTAssertFalse(app.buttons["Step"].isEnabled)
+        XCTAssertTrue(app.buttons["Replay Scenario"].isEnabled)
+
+        let sample = app.buttons["Run Sample Response"]
+        XCTAssertTrue(sample.isEnabled)
+        sample.tap()
+
+        let response = app.cells.matching(
+            NSPredicate(format: "label CONTAINS %@", "Demo 实时响应")
+        ).firstMatch
+        XCTAssertTrue(response.waitForExistence(timeout: 15))
+
+        lab.tap()
+        let replay = app.buttons["Replay Scenario"]
+        XCTAssertTrue(replay.waitForExistence(timeout: 5))
+        replay.tap()
+        XCTAssertTrue(response.waitForNonExistence(timeout: 5))
+    }
+
+    func testPausedPlaybackCanResume() {
+        continueAfterFailure = false
+        let app = makeApp(scenario: "basic-streaming", playbackMode: "paused")
+        app.launch()
+
+        let lab = app.buttons["AgentChatDemoTestLab"]
+        XCTAssertTrue(lab.waitForExistence(timeout: 10))
+        lab.tap()
+        let status = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "Playback: Paused")
+        ).firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+
+        let resume = app.buttons["Resume"]
+        XCTAssertTrue(resume.isEnabled)
+        resume.tap()
+
+        let streamedContent = app.cells.matching(
+            NSPredicate(format: "label CONTAINS %@", "Hello from AgentChatKit")
+        ).firstMatch
+        XCTAssertTrue(streamedContent.waitForExistence(timeout: 10))
+    }
+
+    func testResetPausedCanReleaseOneStep() {
+        continueAfterFailure = false
+        let app = makeApp(scenario: "complete-conversation")
+        app.launch()
+        XCTAssertTrue(app.staticTexts["完整会话体验"].waitForExistence(timeout: 10))
+
+        let lab = app.buttons["AgentChatDemoTestLab"]
+        lab.tap()
+        let reset = app.buttons["Reset Paused"]
+        XCTAssertTrue(reset.waitForExistence(timeout: 5))
+        reset.tap()
+
+        XCTAssertTrue(lab.waitForExistence(timeout: 5))
+        lab.tap()
+        let status = app.buttons.matching(
+            NSPredicate(format: "label CONTAINS %@", "Playback: Paused")
+        ).firstMatch
+        XCTAssertTrue(status.waitForExistence(timeout: 5))
+
+        let step = app.buttons["Step"]
+        XCTAssertTrue(step.isEnabled)
+        step.tap()
+        XCTAssertTrue(app.staticTexts["完整会话体验"].waitForExistence(timeout: 10))
+    }
+
+    func testManualReadingShowsUnreadControlAndCanReturnToLatest() {
+        continueAfterFailure = false
+        let app = makeApp(scenario: "complete-conversation")
+        app.launch()
+        let timeline = app.collectionViews["AgentConversationTimeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 10))
+
+        timeline.swipeDown()
+        timeline.swipeDown()
+
+        let editor = app.textViews["AgentComposerTextView"]
+        editor.tap()
+        editor.typeText("Stream a new result while I read history")
+        app.buttons["AgentComposerSendButton"].tap()
+
+        let jump = app.buttons["AgentConversationJumpToLatestButton"]
+        XCTAssertTrue(jump.waitForExistence(timeout: 5))
+        jump.tap()
+
+        let response = app.cells.matching(
+            NSPredicate(format: "label CONTAINS %@", "Demo 实时响应")
+        ).firstMatch
+        XCTAssertTrue(response.waitForExistence(timeout: 15))
+    }
+
+    func testHistoryPaginationLoadsEarlierPage() {
+        continueAfterFailure = false
+        let app = makeApp(scenario: "history-pagination")
+        app.launch()
+        let timeline = app.collectionViews["AgentConversationTimeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 10))
+
+        timeline.swipeDown()
+        let historyMarker = app.cells.matching(
+            NSPredicate(format: "label CONTAINS %@", "历史消息 #1")
+        ).firstMatch
+        for _ in 0..<4 where !historyMarker.exists {
+            timeline.swipeDown()
+        }
+        XCTAssertTrue(historyMarker.waitForExistence(timeout: 8))
     }
 
     func testMarkdownTableScenarioExposesTableContent() {

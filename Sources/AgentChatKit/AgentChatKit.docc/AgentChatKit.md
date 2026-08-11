@@ -10,7 +10,8 @@ AgentChatKit accepts structured ``AgentRuntimeEvent`` values from an
 renders the result with native UIKit. It never performs model requests, shell commands, file
 operations, navigation, or approvals on behalf of the host.
 
-Start with <doc:GettingStarted>, then use <doc:RuntimeAdapter> to connect a real runtime. Use
+Start with <doc:GettingStarted>, review <doc:ConversationExperience> for the complete page and
+scrolling contract, then use <doc:RuntimeAdapter> to connect a real runtime. Use
 <doc:TestingScenarios> to replay the same deterministic fixture in the Demo and automated tests.
 
 ## Topics
@@ -18,6 +19,7 @@ Start with <doc:GettingStarted>, then use <doc:RuntimeAdapter> to connect a real
 ### Essentials
 
 - <doc:GettingStarted>
+- <doc:ConversationExperience>
 - <doc:RuntimeAdapter>
 - <doc:ComposerIntegration>
 - <doc:TestingScenarios>

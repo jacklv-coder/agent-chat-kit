@@ -18,7 +18,8 @@ Adopted lessons:
 AgentChatKit application:
 
 - versioned `AgentScenarioDocument` JSON;
-- pause, play, step, reset, and rate control in the Demo Test Lab;
+- live playback state plus resume, pause, step, replay, paused reset, and rate control in the Demo
+  Test Lab;
 - a diagnostics overlay with FPS, event count, and scrolling content-size jumps;
 - direct scenario launch for XCUITest;
 - one fixture format shared by Demo and `AgentChatTesting`.
@@ -31,6 +32,11 @@ Audited commit: `83127a485ec34ff6b41bbf51235267531a71f364` (2026-08-10).
 
 Adopted lessons:
 
+- a complete chat page—not a cell gallery—is the primary integration artifact;
+- transcript rendering, pagination, stream orchestration, and scroll policy need separate ownership;
+- follow-latest intent must pause for direct manipulation and resume only through explicit bottom
+  proximity or Jump to Latest;
+- history prepend must preserve a stable visible item instead of restoring a raw content offset;
 - the composer is a stateful subsystem rather than a text field plus Send button;
 - attachment upload/error state, paste handling, focus restoration, keyboard commands, optional
   selectors, and runtime state require independent tests;
@@ -40,6 +46,13 @@ Adopted lessons:
 
 AgentChatKit application:
 
+- the Demo launches directly into a complete conversation; renderer matrices remain in Test Lab;
+- `AgentConversationViewController` owns the page composition while the host owns sessions,
+  persistence, runtime selection, and navigation around it;
+- a pure `AgentScrollPolicy` and stable-ID `AgentScrollCoordinator` encode streaming tolerance,
+  interaction cooldown, unread state, explicit Jump to Latest, and history-prepend anchoring;
+- cursor-addressed history pages are part of deterministic `AgentScenario` fixtures, so UI and
+  integration tests exercise the same `loadEarlier` command path as a real adapter;
 - a runtime-neutral rich composer with attachment strip, progress/failure/retry, non-text paste
   routing, status text, context text, and host-defined accessory controls;
 - a complete CI-built QuickStart adapter instead of an undefined placeholder;
@@ -50,6 +63,7 @@ Not copied:
 
 - Hermex server endpoints, authentication, models, profiles, workspace rules, or persistence;
 - app-specific view models and service coupling;
+- Hermex's conversation-list and cache policy, which remain host-application concerns;
 - OpenMinis product models or production chat layout.
 
 AgentChatKit remains runtime-neutral. Hosts opt into model, reasoning, workspace, profile, voice, or

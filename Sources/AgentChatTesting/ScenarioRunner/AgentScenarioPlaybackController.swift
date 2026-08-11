@@ -78,16 +78,7 @@ public actor AgentScenarioPlaybackController {
     }
 
     func waitBeforeEmission(delayNanoseconds: UInt64) async throws {
-        var isSingleStep = false
-        while isPaused {
-            if pendingStepCount > 0 {
-                pendingStepCount -= 1
-                isSingleStep = true
-                break
-            }
-            try Task.checkCancellation()
-            try await Task.sleep(nanoseconds: 20_000_000)
-        }
+        let isSingleStep = try await waitUntilPlayable()
 
         if !isSingleStep, rate > 0, delayNanoseconds > 0 {
             let scaled = min(
@@ -96,8 +87,24 @@ public actor AgentScenarioPlaybackController {
             )
             try await Task.sleep(nanoseconds: UInt64(scaled))
         }
+        if !isSingleStep {
+            // Pause may have been selected while the scaled delay was sleeping.
+            _ = try await waitUntilPlayable()
+        }
         try Task.checkCancellation()
         emittedEventCount += 1
+    }
+
+    private func waitUntilPlayable() async throws -> Bool {
+        while isPaused {
+            if pendingStepCount > 0 {
+                pendingStepCount -= 1
+                return true
+            }
+            try Task.checkCancellation()
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return false
     }
 
     private static func normalized(_ rate: Double) -> Double {

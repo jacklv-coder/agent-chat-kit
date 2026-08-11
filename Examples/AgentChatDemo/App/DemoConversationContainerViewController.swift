@@ -7,6 +7,8 @@ import UniformTypeIdentifiers
 final class DemoConversationContainerViewController: UIViewController {
     private let scenario: DemoScenario
     private let playbackController: AgentScenarioPlaybackController
+    private let scriptedEventCount: Int
+    private let store: AgentConversationStore
     private let session: AgentChatSession
     private let conversationController: AgentConversationViewController
     private let imageProvider: DemoImageProvider
@@ -21,15 +23,18 @@ final class DemoConversationContainerViewController: UIViewController {
     ) {
         self.scenario = scenario
         self.playbackController = playbackController
+        let scenarioDefinition = scenario.makeScenario()
+        self.scriptedEventCount = scenarioDefinition.events.count
         let imageProvider = DemoImageProvider()
         self.imageProvider = imageProvider
         let runtime = MockAgentRuntime(
-            scenario: scenario.makeScenario(),
+            scenario: scenarioDefinition,
             playbackController: playbackController
         )
         let store = AgentConversationStore(
             snapshot: .empty(conversationID: scenario.conversationID)
         )
+        self.store = store
         self.session = AgentChatSession(
             adapter: runtime,
             configuration: .init(conversationID: scenario.conversationID),
@@ -113,25 +118,126 @@ final class DemoConversationContainerViewController: UIViewController {
     }
 
     private func makeTestLabMenu() -> UIMenu {
+        let deferred = UIDeferredMenuElement.uncached { [weak self] completion in
+            guard let self else {
+                completion([])
+                return
+            }
+            Task { @MainActor [weak self] in
+                guard let self else {
+                    completion([])
+                    return
+                }
+                let state = await self.playbackController.state()
+                completion(self.makeTestLabElements(playbackState: state))
+            }
+        }
+        return UIMenu(title: "AgentChat Test Lab", children: [deferred])
+    }
+
+    private func makeTestLabElements(
+        playbackState: AgentScenarioPlaybackController.State
+    ) -> [UIMenuElement] {
+        var elements: [UIMenuElement] = []
+        if scenario == .completeConversation {
+            let sample = UIAction(
+                title: "Run Sample Response",
+                image: UIImage(systemName: "sparkles"),
+                attributes: isConversationRunning ? .disabled : []
+            ) { [weak self] _ in
+                self?.runSampleResponse()
+            }
+            sample.accessibilityIdentifier = "AgentChatDemoRunSampleResponse"
+            elements.append(
+                UIMenu(title: "Demo", options: .displayInline, children: [sample])
+            )
+        }
+
+        let scenarios = UIMenu(
+            title: "Scenarios",
+            options: .displayInline,
+            children: [
+                UIAction(
+                    title: "Browse All Scenarios",
+                    image: UIImage(systemName: "list.bullet.rectangle")
+                ) { [weak self] _ in
+                    self?.openScenarioBrowser()
+                }
+            ]
+        )
+        elements.append(scenarios)
+
+        let isPlaybackComplete =
+            scriptedEventCount > 0
+            && playbackState.emittedEventCount >= scriptedEventCount
+        let statusTitle: String
+        let statusImage: String
+        if isPlaybackComplete {
+            statusTitle = "Playback: Completed"
+            statusImage = "checkmark.circle.fill"
+        } else if playbackState.isPaused {
+            statusTitle = "Playback: Paused"
+            statusImage = "pause.circle.fill"
+        } else {
+            statusTitle = "Playback: Playing"
+            statusImage = "play.circle.fill"
+        }
+        let status = UIAction(
+            title:
+                "\(statusTitle) · \(min(playbackState.emittedEventCount, scriptedEventCount))/\(scriptedEventCount)",
+            image: UIImage(systemName: statusImage),
+            attributes: .disabled
+        ) { _ in }
+        status.accessibilityIdentifier = "AgentChatDemoPlaybackStatus"
+
+        let resume = UIAction(
+            title: "Resume",
+            image: UIImage(systemName: "play.fill"),
+            attributes: isPlaybackComplete || !playbackState.isPaused ? .disabled : []
+        ) { [playbackController] _ in
+            Task { await playbackController.resume() }
+        }
+        resume.accessibilityIdentifier = "AgentChatDemoPlaybackResume"
+
+        let pause = UIAction(
+            title: "Pause",
+            image: UIImage(systemName: "pause.fill"),
+            attributes: isPlaybackComplete || playbackState.isPaused ? .disabled : []
+        ) { [playbackController] _ in
+            Task { await playbackController.pause() }
+        }
+        pause.accessibilityIdentifier = "AgentChatDemoPlaybackPause"
+
+        let step = UIAction(
+            title: "Step",
+            image: UIImage(systemName: "forward.frame.fill"),
+            attributes: isPlaybackComplete || !playbackState.isPaused ? .disabled : []
+        ) { [playbackController] _ in
+            Task { await playbackController.step() }
+        }
+        step.accessibilityIdentifier = "AgentChatDemoPlaybackStep"
+
+        let replay = UIAction(
+            title: "Replay Scenario",
+            image: UIImage(systemName: "arrow.clockwise")
+        ) { [weak self] _ in
+            self?.replaceScenario(startPaused: false)
+        }
+        replay.accessibilityIdentifier = "AgentChatDemoPlaybackReplay"
+
+        let resetPaused = UIAction(
+            title: "Reset Paused",
+            image: UIImage(systemName: "arrow.counterclockwise")
+        ) { [weak self] _ in
+            self?.replaceScenario(startPaused: true)
+        }
+        resetPaused.accessibilityIdentifier = "AgentChatDemoPlaybackResetPaused"
+
         let playback = UIMenu(
             title: "Playback",
             options: .displayInline,
             children: [
-                UIAction(title: "Play", image: UIImage(systemName: "play.fill")) {
-                    [playbackController] _ in
-                    Task { await playbackController.resume() }
-                },
-                UIAction(title: "Pause", image: UIImage(systemName: "pause.fill")) {
-                    [playbackController] _ in
-                    Task { await playbackController.pause() }
-                },
-                UIAction(title: "Step", image: UIImage(systemName: "forward.frame.fill")) {
-                    [playbackController] _ in
-                    Task { await playbackController.step() }
-                },
-                UIAction(title: "Reset", image: UIImage(systemName: "arrow.counterclockwise")) {
-                    [weak self] _ in self?.resetScenario()
-                },
+                status, resume, pause, step, replay, resetPaused,
                 UIAction(
                     title: "Toggle Diagnostics",
                     image: UIImage(systemName: "gauge.with.dots.needle.67percent")
@@ -142,15 +248,19 @@ final class DemoConversationContainerViewController: UIViewController {
                 },
             ]
         )
+        elements.append(playback)
+
         let rates = UIMenu(
             title: "Speed",
             children: [
-                rateAction(title: "Instant", rate: 0),
-                rateAction(title: "0.5×", rate: 0.5),
-                rateAction(title: "1×", rate: 1),
-                rateAction(title: "2×", rate: 2),
+                rateAction(title: "Instant", rate: 0, selectedRate: playbackState.rate),
+                rateAction(title: "0.5×", rate: 0.5, selectedRate: playbackState.rate),
+                rateAction(title: "1×", rate: 1, selectedRate: playbackState.rate),
+                rateAction(title: "2×", rate: 2, selectedRate: playbackState.rate),
             ]
         )
+        elements.append(rates)
+
         let fixture = UIMenu(
             title: "Fixture",
             options: .displayInline,
@@ -160,16 +270,23 @@ final class DemoConversationContainerViewController: UIViewController {
                 }
             ]
         )
-        return UIMenu(title: "AgentChat Test Lab", children: [playback, rates, fixture])
+        elements.append(fixture)
+        return elements
     }
 
-    private func rateAction(title: String, rate: Double) -> UIAction {
-        UIAction(title: title) { [playbackController] _ in
-            Task {
-                await playbackController.setRate(rate)
-                await playbackController.resume()
-            }
+    private func openScenarioBrowser() {
+        navigationController?.pushViewController(
+            ScenarioListViewController(),
+            animated: true
+        )
+    }
+
+    private func rateAction(title: String, rate: Double, selectedRate: Double) -> UIAction {
+        let action = UIAction(title: title) { [playbackController] _ in
+            Task { await playbackController.setRate(rate) }
         }
+        action.state = selectedRate == rate ? .on : .off
+        return action
     }
 
     private func configureDiagnosticsOverlay() {
@@ -190,13 +307,47 @@ final class DemoConversationContainerViewController: UIViewController {
         diagnosticsOverlay = overlay
     }
 
-    private func resetScenario() {
-        guard let navigationController else { return }
-        let replacement = DemoConversationContainerViewController(scenario: scenario)
-        var controllers = navigationController.viewControllers
-        guard !controllers.isEmpty else { return }
-        controllers[controllers.count - 1] = replacement
-        navigationController.setViewControllers(controllers, animated: false)
+    private func replaceScenario(startPaused: Bool) {
+        Task { @MainActor [weak self] in
+            guard let self, let navigationController else { return }
+            let state = await playbackController.state()
+            let replacement = DemoConversationContainerViewController(
+                scenario: scenario,
+                playbackController: .init(isPaused: startPaused, rate: state.rate)
+            )
+            var controllers = navigationController.viewControllers
+            guard !controllers.isEmpty else { return }
+            controllers[controllers.count - 1] = replacement
+            navigationController.setViewControllers(controllers, animated: false)
+        }
+    }
+
+    private func runSampleResponse() {
+        guard scenario == .completeConversation, !isConversationRunning else { return }
+        let conversationID = scenario.conversationID
+        Task { [weak self, session] in
+            do {
+                try await session.send(
+                    .submit(
+                        .init(
+                            conversationID: conversationID,
+                            text: "运行完整示例，依次展示思考、工具活动与流式 Markdown。",
+                            metadata: ["demo.trigger": .string("test-lab")]
+                        )
+                    )
+                )
+            } catch {
+                self?.showError(error)
+            }
+        }
+    }
+
+    private var isConversationRunning: Bool {
+        guard let state = store.snapshot.turns.last?.state else { return false }
+        switch state {
+        case .streaming, .running, .waitingForApproval: return true
+        default: return false
+        }
     }
 
     private func copyScenarioJSON() {

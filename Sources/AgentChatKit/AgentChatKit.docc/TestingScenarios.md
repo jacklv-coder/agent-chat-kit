@@ -14,7 +14,16 @@ let document = AgentScenarioDocument(
     id: "disconnect-during-stream",
     title: "Disconnect During Stream",
     tags: ["streaming", "reconnect"],
-    scenario: AgentScenario(events: events)
+    scenario: AgentScenario(
+        events: events,
+        historyPages: [
+            "before-page-2": AgentHistoryPage(
+                turns: olderTurns,
+                earlierCursor: "before-page-1",
+                hasEarlierHistory: true
+            )
+        ]
+    )
 )
 let json = try document.encodedJSON()
 let replay = try AgentScenarioDocument.decodeJSON(json)
@@ -31,12 +40,16 @@ duplicate block inserts, stale replacements, and invalid delta revisions.
 ## Control playback
 
 Share one `AgentScenarioPlaybackController` with `MockAgentRuntime`. Set its rate to zero for instant
-tests, pause it for visual inspection, or release one event with `step()`. The Demo's Test Lab menu
-exposes Play, Pause, Step, Reset, speed selection, and Copy Scenario JSON.
+tests, pause it for visual inspection, or release one event with `step()`. When the conversation
+sends `loadEarlier`, the mock resolves its cursor from `historyPages` and emits the same
+`historyPage` payload required from a production adapter. The Demo's Test Lab reports Playing,
+Paused, or Completed state and exposes Resume, Pause, Step, Replay Scenario, Reset Paused, speed
+selection, and Copy Scenario JSON. Complete Conversation also provides Run Sample Response for a
+one-tap thinking, tool, and streaming Markdown walkthrough.
 
 ## Launch the Demo deterministically
 
-UI tests can bypass the scenario list:
+Normal launch opens `complete-conversation`. UI tests can bypass that page and select any scenario:
 
 ```text
 launch argument: --agentchat-uitest
@@ -47,4 +60,5 @@ AGENTCHAT_PLAYBACK_RATE=0.5 | 1 | 2
 
 Every built-in block should have fixtures for queued, running or streaming, succeeded, failed, and
 cancelled states where applicable. Add iPhone/iPad, Light/Dark, accessibility text, expansion,
-history prepend, and user-scrolled-away variants before declaring a renderer complete.
+history prepend, explicit Jump to Latest, reconnect, and user-scrolled-away streaming variants
+before declaring a conversation experience complete.

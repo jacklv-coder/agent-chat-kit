@@ -3,6 +3,7 @@ import AgentChatTesting
 import Foundation
 
 enum DemoScenario: String, CaseIterable {
+    case completeConversation = "Complete Conversation"
     case completeShowcase = "Complete Cell Showcase"
     case currentConversation = "Current Chat Replay"
     case basicStreaming = "Basic Streaming"
@@ -40,6 +41,8 @@ enum DemoScenario: String, CaseIterable {
 
     var summary: String {
         switch self {
+        case .completeConversation:
+            "Full message list, live input, history paging, scroll protection, and tool activity"
         case .completeShowcase: "Every built-in block plus custom, fallback, and interactive cells"
         case .currentConversation: "Real Chinese turns, Markdown, links, and tool activity cells"
         case .basicStreaming: "Revisioned Markdown deltas at a realistic cadence"
@@ -69,12 +72,17 @@ enum DemoScenario: String, CaseIterable {
             return streamingScenario()
         case .approval:
             return approvalScenario()
+        case .offlineAndReconnect:
+            return reconnectScenario()
         default:
             let event = runtimeEvent(
                 sequence: 1,
                 payload: .snapshot(snapshot())
             )
-            return .init(events: [.init(event: event, delayNanoseconds: 20_000_000)])
+            return .init(
+                events: [.init(event: event, delayNanoseconds: 20_000_000)],
+                historyPages: historyPages
+            )
         }
     }
 
@@ -90,6 +98,7 @@ enum DemoScenario: String, CaseIterable {
 
     private var scenarioTags: [String] {
         switch self {
+        case .completeConversation: ["conversation", "streaming", "scrolling", "history"]
         case .basicStreaming: ["streaming", "markdown"]
         case .markdownShowcase, .chineseContent: ["markdown", "content"]
         case .completeShowcase, .currentConversation: ["showcase", "replay"]
@@ -101,6 +110,32 @@ enum DemoScenario: String, CaseIterable {
         case .iPadStageManager: ["ipad", "layout"]
         case .accessibility: ["accessibility"]
         case .unknownToolFallback, .customRenderer: ["custom", "tool"]
+        }
+    }
+
+    private var historyPages: [String: AgentHistoryPage] {
+        switch self {
+        case .completeConversation:
+            [
+                "recent-history": .init(
+                    turns: conversationHistoryTurns(in: 6..<12),
+                    earlierCursor: "oldest-history",
+                    hasEarlierHistory: true
+                ),
+                "oldest-history": .init(
+                    turns: conversationHistoryTurns(in: 0..<6),
+                    hasEarlierHistory: false
+                ),
+            ]
+        case .historyPagination:
+            [
+                "earlier-page": .init(
+                    turns: conversationHistoryTurns(in: 0..<10),
+                    hasEarlierHistory: false
+                )
+            ]
+        default:
+            [:]
         }
     }
 
@@ -168,8 +203,35 @@ enum DemoScenario: String, CaseIterable {
         return .init(events: [.init(event: snapshotEvent, delayNanoseconds: 20_000_000)])
     }
 
+    private func reconnectScenario() -> AgentScenario {
+        let events = [
+            AgentScenarioEvent(
+                event: runtimeEvent(sequence: 1, payload: .snapshot(snapshot())),
+                delayNanoseconds: 20_000_000
+            ),
+            AgentScenarioEvent(
+                event: runtimeEvent(
+                    sequence: 2,
+                    payload: .conversationStateChanged(.connecting)
+                ),
+                delayNanoseconds: 1_000_000_000
+            ),
+            AgentScenarioEvent(
+                event: runtimeEvent(
+                    sequence: 3,
+                    payload: .conversationStateChanged(.connected)
+                ),
+                delayNanoseconds: 1_000_000_000
+            ),
+        ]
+        return .init(events: events)
+    }
+
     private func snapshot() -> AgentConversationSnapshot {
         let date = Date(timeIntervalSince1970: 0)
+        if self == .completeConversation {
+            return completeConversationSnapshot(date: date)
+        }
         if self == .completeShowcase {
             return completeShowcaseSnapshot(date: date)
         }
@@ -373,8 +435,162 @@ enum DemoScenario: String, CaseIterable {
                             markdown: "Scroll to the top to request earlier history.", isFinal: true
                         )))
             ]
-        case .completeShowcase, .currentConversation, .basicStreaming, .longConversation:
+        case .completeConversation, .completeShowcase, .currentConversation, .basicStreaming,
+            .longConversation:
             []
+        }
+    }
+
+    private func completeConversationSnapshot(date: Date) -> AgentConversationSnapshot {
+        let recentHistory = conversationHistoryTurns(in: 12..<24)
+        let userRequest = AgentTurn(
+            id: "complete-conversation-user",
+            role: .user,
+            blocks: [
+                block(
+                    id: "complete-conversation-user-text",
+                    content: .userText(
+                        .init(
+                            text:
+                                "请检查这个 SDK 的完整消息列表体验，包括流式跟随、历史分页和工具活动。"
+                        )
+                    )
+                )
+            ],
+            state: .completed,
+            createdAt: date.addingTimeInterval(24),
+            completedAt: date.addingTimeInterval(24)
+        )
+
+        var commandOutput = AgentTextBuffer()
+        commandOutput.append(
+            "Inspecting conversation controller…\nScroll anchors: ready\nHistory paging: ready\n"
+        )
+        let assistantResponse = AgentTurn(
+            id: "complete-conversation-assistant",
+            role: .assistant,
+            blocks: [
+                block(
+                    id: "complete-conversation-thinking",
+                    content: .activity(
+                        .init(
+                            title: "已检查完整会话页面",
+                            detail: "消息列表、输入区和运行状态由同一个会话控制器协调。"
+                        )
+                    )
+                ),
+                block(
+                    id: "complete-conversation-search",
+                    content: .fileSearch(
+                        .init(
+                            query: "AgentScrollCoordinator",
+                            root: "Sources/AgentChatUIKit",
+                            matches: [
+                                .init(
+                                    path:
+                                        "Sources/AgentChatUIKit/Scrolling/AgentScrollCoordinator.swift",
+                                    excerpt: "final class AgentScrollCoordinator",
+                                    line: 5
+                                )
+                            ],
+                            totalCount: 1
+                        )
+                    )
+                ),
+                block(
+                    id: "complete-conversation-command",
+                    content: .command(
+                        .init(
+                            command: "swift test --filter AgentTimelineTests",
+                            workingDirectory: "/project",
+                            output: commandOutput,
+                            exitCode: 0,
+                            duration: 0.8
+                        )
+                    )
+                ),
+                block(
+                    id: "complete-conversation-summary",
+                    content: .markdown(
+                        .init(
+                            markdown: """
+                                ## 完整会话体验
+
+                                这个页面不是 Cell 陈列，而是一套可直接嵌入宿主 App 的消息列表：
+
+                                - 向上滚动时保持阅读位置，不会被流式高度变化拉回底部；
+                                - 新消息到达时显示“回到最新消息”；
+                                - 到达顶部后请求上一页，并保持原有首条可见消息的位置；
+                                - 输入任意内容可查看 Thinking、工具和 Markdown 逐步输出；
+                                - Test Lab 中仍保留所有专项 Cell 与生命周期场景。
+
+                                | 页面能力 | 当前状态 |
+                                | --- | --- |
+                                | 原生消息列表 | 已启用 |
+                                | 流式跟随保护 | 已启用 |
+                                | 顶部历史分页 | 可交互 |
+                                | iPhone / iPad | 自适应 |
+                                """,
+                            isFinal: true
+                        )
+                    )
+                ),
+            ],
+            state: .completed,
+            createdAt: date.addingTimeInterval(25),
+            completedAt: date.addingTimeInterval(26)
+        )
+
+        return .init(
+            id: conversationID,
+            title: rawValue,
+            turns: recentHistory + [userRequest, assistantResponse],
+            state: .connected,
+            earlierHistoryCursor: "recent-history",
+            hasEarlierHistory: true,
+            metadata: ["demo.kind": .string("complete-conversation")]
+        )
+    }
+
+    private func conversationHistoryTurns(in range: Range<Int>) -> [AgentTurn] {
+        let date = Date(timeIntervalSince1970: 0)
+        return range.map { index in
+            let role: AgentTurnRole = index.isMultiple(of: 2) ? .user : .assistant
+            let content: AgentBlockContent
+            switch role {
+            case .user:
+                content = .userText(
+                    .init(
+                        text:
+                            "历史消息 #\(index + 1)：请继续检查消息列表在长会话中的滚动位置。"
+                    )
+                )
+            case .assistant, .system:
+                content = .markdown(
+                    .init(
+                        markdown: """
+                            **历史回复 #\(index + 1)**
+
+                            已记录当前阅读锚点，并保持消息顺序与动态高度稳定。
+                            """,
+                        isFinal: true
+                    )
+                )
+            }
+            let timestamp = date.addingTimeInterval(Double(index))
+            return AgentTurn(
+                id: .init(rawValue: "conversation-history-turn-\(index)"),
+                role: role,
+                blocks: [
+                    block(
+                        id: .init(rawValue: "conversation-history-block-\(index)"),
+                        content: content
+                    )
+                ],
+                state: .completed,
+                createdAt: timestamp,
+                completedAt: timestamp
+            )
         }
     }
 

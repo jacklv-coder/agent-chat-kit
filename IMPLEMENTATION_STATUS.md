@@ -40,8 +40,10 @@ code, tests, demo path, and documentation are present.
 - [x] 33–80ms `AgentUpdateScheduler` coalescing
 - [x] Stable-ID `AgentScrollCoordinator` and `AgentLayoutAnchor`
 - [x] History prepend restoration and deleted-anchor fallback tests
+- [x] Cursor-backed history loading with one-request-per-drag gating and visible progress
 - [x] Bounded, appearance-sensitive `AgentItemSizeCache`
 - [x] Jump to Latest and unread tracking
+- [x] Streaming-aware follow policy with direct-manipulation cooldown and deterministic tests
 - [ ] Physical-device 2pt drift and sustained-streaming acceptance benchmarks
 
 ## Phase 4 — Markdown (in progress)
@@ -66,6 +68,8 @@ code, tests, demo path, and documentation are present.
 - [x] Rich composer attachment upload/retry/removal, host accessories, file paste/import routing,
   context status, and offline draft preservation
 - [x] Interactive Mock Runtime submit flow with thinking, tools, and streaming Markdown results
+- [x] Complete conversation Demo is the default launch; isolated renderer scenarios remain in Test Lab
+- [x] State-aware Test Lab playback plus replay, paused reset, step, and one-tap sample response
 - [x] Whole-row tool disclosure with icon/title/detail structure and animated height changes
 - [x] `keyboardLayoutGuide`, interactive dismissal, and hardware key commands
 - [x] Adaptive iPad content width, Light/Dark semantic theme, Dynamic Type, and VoiceOver labels

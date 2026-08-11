@@ -324,7 +324,7 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
         contextLabel.adjustsFontForContentSizeCategory = true
         contextLabel.textColor = .tertiaryLabel
         contextLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
-        toolbar.addArrangedSubview(contextLabel)
+        contextLabel.accessibilityIdentifier = "AgentComposerContext"
 
         sendButton.accessibilityIdentifier = "AgentComposerSendButton"
         sendButton.addAction(UIAction { [weak self] _ in self?.sendOrStop() }, for: .touchUpInside)
@@ -384,7 +384,10 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
             )
             accessoryStack.addArrangedSubview(button)
         }
-        accessoryScrollView.isHidden = state.accessories.isEmpty
+        if !contextLabel.isHidden {
+            accessoryStack.addArrangedSubview(contextLabel)
+        }
+        accessoryScrollView.isHidden = state.accessories.isEmpty && contextLabel.isHidden
     }
 
     private func configureSendButton() {
