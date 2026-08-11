@@ -158,47 +158,24 @@ final class AgentScrollCoordinator {
         mode = .readingHistory(anchor: captureAnchor(edge: anchor.edge))
     }
 
-    func preserveReadingAnchor(for updates: () -> Void) {
-        guard !isFollowingLatest, let anchor = captureAnchor(edge: .top) else {
-            updates()
-            return
-        }
-        updates()
-        restore(anchor)
-    }
-
     func receivedNewContent(count: Int = 1) {
         guard !isFollowingLatest else { return }
         unreadCount += max(0, count)
         didChangeUnreadCount?(unreadCount)
     }
 
-    func scrollToLatest(animated: Bool) {
+    func scrollToLatest() {
         guard let collectionView else { return }
         isUserInteracting = false
         userInteractionCooldownUntil = nil
-        // A user tap establishes follow-latest intent immediately. Streaming size
-        // changes can otherwise cancel the UIKit animation before its completion
-        // callback and leave the coordinator in its previous reading state.
         mode = .followingLatest
         clearUnread()
         collectionView.layoutIfNeeded()
-        let target = max(
-            -collectionView.adjustedContentInset.top,
-            collectionView.contentSize.height - collectionView.bounds.height
-                + collectionView.adjustedContentInset.bottom
-        )
+        let target = latestOffset(in: collectionView)
         collectionView.setContentOffset(
             CGPoint(x: collectionView.contentOffset.x, y: target),
-            animated: animated
+            animated: false
         )
-    }
-
-    func programmaticScrollDidEnd() {
-        isUserInteracting = false
-        userInteractionCooldownUntil = nil
-        mode = .followingLatest
-        clearUnread()
     }
 
     private func isNearBottom(in collectionView: UICollectionView) -> Bool {
@@ -239,6 +216,14 @@ final class AgentScrollCoordinator {
                 + collectionView.adjustedContentInset.bottom
         )
         return min(maximum, max(minimum, y))
+    }
+
+    private func latestOffset(in collectionView: UICollectionView) -> CGFloat {
+        max(
+            -collectionView.adjustedContentInset.top,
+            collectionView.contentSize.height - collectionView.bounds.height
+                + collectionView.adjustedContentInset.bottom
+        )
     }
 
     private func clearUnread() {

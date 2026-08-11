@@ -73,8 +73,9 @@ xcodebuild -scheme AgentChatKit-Package \
   -destination 'platform=iOS Simulator,name=iPhone 16' test
 ```
 
-The UIKit timeline uses a native single-column compositional layout, `AgentUpdateScheduler`, and
-stable-ID `AgentScrollCoordinator` anchoring. The demo project is generated from
+The UIKit timeline uses a native single-column compositional layout, a traditional
+`UICollectionViewDataSource`, explicit non-animated batch updates, and stable-ID history anchoring.
+The demo project is generated from
 `Examples/AgentChatDemo/project.yml` with `xcodegen generate`.
 
 ## Offline demo
@@ -93,7 +94,7 @@ contains all normative scenarios, including a complete cell showcase and a curre
 replay for checking realistic Chinese Markdown, tables, trees, long-message layout, and sanitized
 tool activity for commands, image inspection, file edits, skills, and host integrations. Tool
 activity uses compact icon-and-summary rows with
-whole-row expandable details and animated height changes. Expanded image activity resolves a
+whole-row expandable details and immediate self-sizing height updates. Expanded image activity resolves a
 thumbnail through the injected `AgentImageProviding`; tapping it opens the Demo's full-screen
 pan-and-zoom preview. Markdown tables use a native, accessible grid with horizontal scrolling when
 needed. The timeline follows streaming output only while the reader owns the latest position,

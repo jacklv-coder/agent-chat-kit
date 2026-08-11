@@ -6,6 +6,8 @@ import UIKit
 final class AgentBlockCell: UICollectionViewCell {
     static let reuseIdentifier = "AgentBlockCell"
 
+    var didChangeHeight: (() -> Void)?
+
     private let rootStack = UIStackView()
     private var asynchronousTask: Task<Void, Never>?
     private var representedBlockID: AgentBlockID?
@@ -34,6 +36,7 @@ final class AgentBlockCell: UICollectionViewCell {
         asynchronousTask = nil
         representedBlockID = nil
         representedRevision = nil
+        didChangeHeight = nil
         removeArrangedSubviews()
         accessibilityLabel = nil
         accessibilityValue = nil
@@ -89,6 +92,13 @@ final class AgentBlockCell: UICollectionViewCell {
                     self.representedRevision == revision
                 else { return }
                 markdownView?.apply(document)
+                // The parsed document can replace a short raw placeholder with a much taller
+                // table, list, or code block without changing the model revision. Explicitly
+                // invalidate the self-sizing cell so the collection view resolves the final
+                // height in the same layout-follow cycle.
+                self.contentView.invalidateIntrinsicContentSize()
+                self.invalidateIntrinsicContentSize()
+                self.didChangeHeight?()
             }
             return
         }

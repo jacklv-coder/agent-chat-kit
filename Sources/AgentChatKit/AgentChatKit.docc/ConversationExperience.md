@@ -44,8 +44,16 @@ URL policy, and image or artifact destinations.
 The timeline follows new and height-changing streaming content while the reader remains near the
 latest message. Direct manipulation pauses automatic following for a short cooldown. Once the reader
 moves away, new content increments the Jump to Latest affordance instead of moving the viewport.
-Tapping it establishes follow intent immediately, including when a streaming height update interrupts
-the UIKit scroll animation.
+Tapping it establishes follow intent and updates the content offset immediately.
+
+The timeline uses a traditional `UICollectionViewDataSource`. Insertions and deletions update the
+backing turns first, then commit explicit, non-animated `performBatchUpdates`; content-only changes
+reconfigure only their affected items. Parsed Markdown height changes request one self-sizing batch,
+and only readers already following the latest message are returned to the bottom.
+
+Compact tool and activity rows use the same direct update path: change `expandedBlockIDs`, reconfigure
+that item without animation, resolve self-sizing once, and keep that cell's top at the same viewport
+position. The detail stack simply participates in layout when expanded and is hidden when collapsed.
 
 Do not reach into the collection view to manage offsets from the host. The controller preserves a
 stable block identifier and viewport-relative offset when older turns are prepended, and falls back to

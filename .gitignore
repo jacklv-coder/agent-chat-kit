@@ -5,4 +5,5 @@ DerivedData/
 xcuserdata/
 *.xcuserstate
 Examples/AgentChatDemo/AgentChatDemo.xcodeproj/project.xcworkspace/xcuserdata/
-doc/refrence/OpenMinis/
+doc/refrence/
+doc/ipa/

@@ -144,6 +144,7 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
     private let contextLabel = UILabel()
     private let sendButton = UIButton(type: .system)
     private var state = AgentComposerState()
+    private var hasAppliedState = false
     private var textHeightConstraint: NSLayoutConstraint?
     private let maximumHeight: CGFloat
 
@@ -178,6 +179,17 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
 
     /// Applies draft, attachments, runtime state, and host-defined controls.
     public func apply(_ state: AgentComposerState) {
+        let previousState = currentState
+        guard !hasAppliedState || previousState != state else { return }
+        let rebuildAttachmentViews =
+            !hasAppliedState
+            || previousState.attachments != state.attachments
+            || previousState.attachmentStatuses != state.attachmentStatuses
+        let rebuildAccessoryViews =
+            !hasAppliedState
+            || previousState.accessories != state.accessories
+            || previousState.contextDescription != state.contextDescription
+        hasAppliedState = true
         self.state = state
         if textView.text != state.text { textView.text = state.text }
         placeholderLabel.isHidden = !state.text.isEmpty
@@ -187,8 +199,8 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
         contextLabel.isHidden = state.contextDescription?.isEmpty != false
         attachmentButton.isEnabled = state.canPickAttachments
         attachmentButton.isHidden = !state.canPickAttachments
-        rebuildAttachments()
-        rebuildAccessories()
+        if rebuildAttachmentViews { rebuildAttachments() }
+        if rebuildAccessoryViews { rebuildAccessories() }
         configureSendButton()
         updateTextHeight()
     }
@@ -411,9 +423,10 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
     }
 
     private func removeAttachment(_ id: AgentAttachmentID) {
-        state.attachments.removeAll { $0.id == id }
-        state.attachmentStatuses[id] = nil
-        apply(state)
+        var updatedState = state
+        updatedState.attachments.removeAll { $0.id == id }
+        updatedState.attachmentStatuses[id] = nil
+        apply(updatedState)
         continuation.yield(.removeAttachment(id))
     }
 

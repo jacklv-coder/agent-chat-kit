@@ -62,3 +62,11 @@ Every built-in block should have fixtures for queued, running or streaming, succ
 cancelled states where applicable. Add iPhone/iPad, Light/Dark, accessibility text, expansion,
 history prepend, explicit Jump to Latest, reconnect, and user-scrolled-away streaming variants
 before declaring a conversation experience complete.
+
+For bottom-follow regressions, cover both structural insertion and a parsed Markdown result whose
+final self-sizing height differs from its estimate. Assert a zero bottom distance after layout and
+verify that the same reconciliation becomes a no-op as soon as direct manipulation begins.
+
+For disclosure regressions, assert that a visible tool row reconfigures without layer animations, keeps
+the tapped header at the same viewport position, updates accessibility state, and resolves the expanded
+or collapsed self-sizing height in one completed layout pass.

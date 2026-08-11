@@ -83,6 +83,50 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertEqual(action, .selectAccessory("model"))
     }
 
+    func testComposerDoesNotRebuildControlsForIdenticalRuntimeState() throws {
+        let composer = AgentComposerView()
+        let state = AgentComposerState(
+            accessories: [
+                .init(id: "model", title: "GPT-5", systemImageName: "cpu")
+            ],
+            statusMessage: "Running",
+            isRunning: true,
+            canSend: false
+        )
+        composer.apply(state)
+        let original = try XCTUnwrap(
+            composer.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentComposerAccessory.model"
+            } as? UIButton
+        )
+
+        composer.apply(state)
+
+        let current = try XCTUnwrap(
+            composer.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentComposerAccessory.model"
+            } as? UIButton
+        )
+        XCTAssertTrue(original === current)
+    }
+
+    func testComposerRebuildsContextWhenOnlyDescriptionChanges() throws {
+        let composer = AgentComposerView()
+        composer.apply(.init(contextDescription: "32k"))
+        let label = try XCTUnwrap(
+            composer.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentComposerContext"
+            } as? UILabel
+        )
+        XCTAssertEqual(label.text, "32k")
+        XCTAssertNotNil(label.superview)
+
+        composer.apply(.init(contextDescription: "18k"))
+
+        XCTAssertEqual(label.text, "18k")
+        XCTAssertNotNil(label.superview)
+    }
+
     func testComposerBlocksSubmissionForFailedAttachment() throws {
         let composer = AgentComposerView()
         composer.apply(
@@ -363,6 +407,194 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertEqual(collectionView?.numberOfSections, 2)
         XCTAssertEqual(collectionView?.numberOfItems(inSection: 0), 1)
         XCTAssertEqual(collectionView?.numberOfItems(inSection: 1), 2)
+    }
+
+    func testControllerPinsBottomAfterStructuralAndParsedMarkdownHeightChanges() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        let initialTurns = (0..<18).map { index in
+            AgentTurn(
+                id: .init(rawValue: "initial-turn-\(index)"),
+                role: .assistant,
+                blocks: [
+                    .init(
+                        id: .init(rawValue: "initial-block-\(index)"),
+                        kind: .activity,
+                        content: .activity(.init(title: "Finished step \(index)")),
+                        state: .succeeded,
+                        createdAt: date
+                    )
+                ],
+                state: .completed,
+                createdAt: date
+            )
+        }
+        let store = AgentConversationStore(
+            snapshot: .init(id: "bottom-pin", turns: initialTurns)
+        )
+        let controller = AgentConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let collectionView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UICollectionView }.first
+        )
+        collectionView.layoutIfNeeded()
+        XCTAssertEqual(distanceToBottom(in: collectionView), 0, accuracy: 0.5)
+
+        let markdownID = AgentBlockID(rawValue: "parsed-markdown")
+        let markdownTurn = AgentTurn(
+            id: "markdown-turn",
+            role: .assistant,
+            blocks: [
+                .init(
+                    id: markdownID,
+                    kind: .markdown,
+                    content: .markdown(
+                        .init(
+                            markdown: """
+                                ## Result
+
+                                | Stage | Result |
+                                | --- | --- |
+                                | Thinking | Complete |
+                                | Search | 12 matches |
+                                | Tests | Passed |
+
+                                The rendered table is intentionally taller than its estimate.
+                                """,
+                            isFinal: true
+                        )
+                    ),
+                    state: .succeeded,
+                    createdAt: date
+                )
+            ],
+            state: .completed,
+            createdAt: date
+        )
+        var updatedSnapshot = store.snapshot
+        updatedSnapshot.turns.append(markdownTurn)
+        store.apply(
+            .init(
+                snapshot: updatedSnapshot,
+                patches: [.insertTurn(markdownTurn.id, index: initialTurns.count)]
+            )
+        )
+        let applied = expectation(description: "coalesced structural update")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { applied.fulfill() }
+        await fulfillment(of: [applied], timeout: 1)
+        controller.view.layoutIfNeeded()
+        collectionView.layoutIfNeeded()
+        for cell in collectionView.visibleCells.compactMap({ $0 as? AgentBlockCell }) {
+            await cell.waitForPendingRendering()
+        }
+        controller.view.layoutIfNeeded()
+        collectionView.layoutIfNeeded()
+
+        XCTAssertEqual(distanceToBottom(in: collectionView), 0, accuracy: 0.5)
+        XCTAssertNotNil(collectionView.cellForItem(at: .init(item: 0, section: 18)))
+    }
+
+    func testControllerReconfiguresToolExpansionWithoutAnimations() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        let activityBlocks = (0..<18).map { index in
+            AgentBlock(
+                id: .init(rawValue: "expansion-activity-\(index)"),
+                kind: .activity,
+                content: .activity(.init(title: "Finished step \(index)")),
+                state: .succeeded,
+                createdAt: date
+            )
+        }
+        var output = AgentTextBuffer()
+        output.append((0..<12).map { "test output \($0)" }.joined(separator: "\n"))
+        let command = AgentBlock(
+            id: "expansion-command",
+            kind: .command,
+            content: .command(
+                .init(
+                    command: "swift test --filter AgentTimelineTests", output: output, exitCode: 0)
+            ),
+            state: .succeeded,
+            createdAt: date
+        )
+        let trailingBlocks = (0..<7).map { index in
+            AgentBlock(
+                id: .init(rawValue: "expansion-trailing-\(index)"),
+                kind: .activity,
+                content: .activity(.init(title: "Following result \(index)")),
+                state: .succeeded,
+                createdAt: date
+            )
+        }
+        let turn = AgentTurn(
+            id: "expansion-turn",
+            role: .assistant,
+            blocks: activityBlocks + [command] + trailingBlocks,
+            state: .completed,
+            createdAt: date
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(id: "expansion-animation", turns: [turn])
+        )
+        let controller = AgentConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let collectionView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UICollectionView }.first
+        )
+        collectionView.layoutIfNeeded()
+        let path = IndexPath(item: activityBlocks.count, section: 0)
+        let cell = try XCTUnwrap(collectionView.cellForItem(at: path) as? AgentBlockCell)
+        let header = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventHeader"
+            } as? UIControl
+        )
+        let collapsedHeight = cell.frame.height
+        let headerY = header.convert(header.bounds, to: window).minY
+
+        header.sendActions(for: .touchUpInside)
+        let expanded = expectation(description: "expanded reconfiguration")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { expanded.fulfill() }
+        await fulfillment(of: [expanded], timeout: 1)
+        controller.view.layoutIfNeeded()
+        collectionView.layoutIfNeeded()
+
+        let expandedCell = try XCTUnwrap(collectionView.cellForItem(at: path) as? AgentBlockCell)
+        let expandedHeader = try XCTUnwrap(
+            expandedCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventHeader"
+            } as? UIControl
+        )
+        let details = try XCTUnwrap(
+            expandedCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventDetails"
+            }
+        )
+        XCTAssertFalse(details.isHidden)
+        XCTAssertGreaterThan(expandedCell.frame.height, collapsedHeight + 20)
+        XCTAssertEqual(
+            expandedHeader.convert(expandedHeader.bounds, to: window).minY,
+            headerY,
+            accuracy: 1
+        )
+        XCTAssertNil(collectionView.layer.animationKeys())
+        XCTAssertNil(expandedCell.layer.animationKeys())
+
+        expandedHeader.sendActions(for: .touchUpInside)
+        let collapsed = expectation(description: "collapsed reconfiguration")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { collapsed.fulfill() }
+        await fulfillment(of: [collapsed], timeout: 1)
+        controller.view.layoutIfNeeded()
+        collectionView.layoutIfNeeded()
+
+        let collapsedCell = try XCTUnwrap(collectionView.cellForItem(at: path) as? AgentBlockCell)
+        XCTAssertEqual(collapsedCell.frame.height, collapsedHeight, accuracy: 1)
+        XCTAssertNil(collectionView.layer.animationKeys())
     }
 
     func testControllerDefensivelyFiltersDuplicateStableIdentifiers() {
@@ -779,14 +1011,11 @@ final class AgentTimelineTests: XCTestCase {
             collectionViewLayout: fixedHeightLayout()
         )
         collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "cell")
-        var dataSource: UICollectionViewDiffableDataSource<Int, AgentBlockID>!
-        dataSource = .init(collectionView: collectionView) { collectionView, indexPath, _ in
-            collectionView.dequeueReusableCell(withReuseIdentifier: "cell", for: indexPath)
-        }
-        var snapshot = NSDiffableDataSourceSnapshot<Int, AgentBlockID>()
-        snapshot.appendSections([0])
-        snapshot.appendItems((0..<12).map { .init(rawValue: "cooldown-block-\($0)") })
-        dataSource.apply(snapshot, animatingDifferences: false)
+        let dataSource = BlockCollectionDataSource(
+            ids: (0..<12).map { .init(rawValue: "cooldown-block-\($0)") }
+        )
+        collectionView.dataSource = dataSource
+        collectionView.reloadData()
         collectionView.layoutIfNeeded()
         collectionView.contentOffset.y = max(
             0,
@@ -798,7 +1027,7 @@ final class AgentTimelineTests: XCTestCase {
             followingThreshold: 80,
             itemIdentifier: { dataSource.itemIdentifier(for: $0) },
             indexPath: { dataSource.indexPath(for: $0) },
-            orderedBlockIDs: { dataSource.snapshot().itemIdentifiers }
+            orderedBlockIDs: { dataSource.ids }
         )
         let now = Date(timeIntervalSince1970: 100)
         coordinator.userWillBeginDragging()
@@ -815,14 +1044,11 @@ final class AgentTimelineTests: XCTestCase {
             collectionViewLayout: fixedHeightLayout()
         )
         collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "cell")
-        var dataSource: UICollectionViewDiffableDataSource<Int, AgentBlockID>!
-        dataSource = .init(collectionView: collectionView) { collectionView, indexPath, _ in
-            collectionView.dequeueReusableCell(withReuseIdentifier: "cell", for: indexPath)
-        }
-        var snapshot = NSDiffableDataSourceSnapshot<Int, AgentBlockID>()
-        snapshot.appendSections([0])
-        snapshot.appendItems((0..<12).map { .init(rawValue: "jump-block-\($0)") })
-        dataSource.apply(snapshot, animatingDifferences: false)
+        let dataSource = BlockCollectionDataSource(
+            ids: (0..<12).map { .init(rawValue: "jump-block-\($0)") }
+        )
+        collectionView.dataSource = dataSource
+        collectionView.reloadData()
         collectionView.layoutIfNeeded()
 
         let coordinator = AgentScrollCoordinator(
@@ -830,7 +1056,7 @@ final class AgentTimelineTests: XCTestCase {
             followingThreshold: 80,
             itemIdentifier: { dataSource.itemIdentifier(for: $0) },
             indexPath: { dataSource.indexPath(for: $0) },
-            orderedBlockIDs: { dataSource.snapshot().itemIdentifiers }
+            orderedBlockIDs: { dataSource.ids }
         )
         collectionView.contentOffset.y = 0
         coordinator.userWillBeginDragging()
@@ -838,7 +1064,7 @@ final class AgentTimelineTests: XCTestCase {
         coordinator.receivedNewContent(count: 2)
         XCTAssertEqual(coordinator.unreadCount, 2)
 
-        coordinator.scrollToLatest(animated: true)
+        coordinator.scrollToLatest()
 
         XCTAssertTrue(coordinator.isFollowingLatest)
         XCTAssertTrue(coordinator.shouldAutomaticallyFollowLatest)
@@ -851,14 +1077,11 @@ final class AgentTimelineTests: XCTestCase {
             collectionViewLayout: fixedHeightLayout()
         )
         collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "cell")
-        var dataSource: UICollectionViewDiffableDataSource<Int, AgentBlockID>!
-        dataSource = .init(collectionView: collectionView) { collectionView, indexPath, _ in
-            collectionView.dequeueReusableCell(withReuseIdentifier: "cell", for: indexPath)
-        }
-        var snapshot = NSDiffableDataSourceSnapshot<Int, AgentBlockID>()
-        snapshot.appendSections([0])
-        snapshot.appendItems((0..<12).map { .init(rawValue: "block-\($0)") })
-        dataSource.apply(snapshot, animatingDifferences: false)
+        let dataSource = BlockCollectionDataSource(
+            ids: (0..<12).map { .init(rawValue: "block-\($0)") }
+        )
+        collectionView.dataSource = dataSource
+        collectionView.reloadData()
         collectionView.layoutIfNeeded()
         collectionView.contentOffset.y = 160
 
@@ -867,22 +1090,28 @@ final class AgentTimelineTests: XCTestCase {
             followingThreshold: 80,
             itemIdentifier: { dataSource.itemIdentifier(for: $0) },
             indexPath: { dataSource.indexPath(for: $0) },
-            orderedBlockIDs: { dataSource.snapshot().itemIdentifiers }
+            orderedBlockIDs: { dataSource.ids }
         )
         let anchor = coordinator.captureAnchor(edge: .top)
         XCTAssertNotNil(anchor)
 
-        snapshot.insertItems(["prepended"], beforeItem: "block-0")
-        dataSource.apply(snapshot, animatingDifferences: false)
+        dataSource.ids.insert("prepended", at: 0)
+        collectionView.performBatchUpdates {
+            collectionView.insertItems(at: [IndexPath(item: 0, section: 0)])
+        }
         collectionView.layoutIfNeeded()
         if let anchor { coordinator.restore(anchor) }
         let restored = coordinator.captureAnchor(edge: .top)
         XCTAssertEqual(restored?.blockID, anchor?.blockID)
         XCTAssertEqual(restored?.viewportOffset ?? 100, anchor?.viewportOffset ?? 0, accuracy: 0.5)
 
-        if let target = anchor?.blockID {
-            snapshot.deleteItems([target])
-            dataSource.apply(snapshot, animatingDifferences: false)
+        if let target = anchor?.blockID,
+            let deletedIndexPath = dataSource.indexPath(for: target)
+        {
+            dataSource.ids.remove(at: deletedIndexPath.item)
+            collectionView.performBatchUpdates {
+                collectionView.deleteItems(at: [deletedIndexPath])
+            }
             collectionView.layoutIfNeeded()
             coordinator.restore(anchor!)
             if case .readingHistory(let fallback) = coordinator.mode {
@@ -902,6 +1131,13 @@ final class AgentTimelineTests: XCTestCase {
         let item = NSCollectionLayoutItem(layoutSize: size)
         let group = NSCollectionLayoutGroup.vertical(layoutSize: size, subitems: [item])
         return UICollectionViewCompositionalLayout(section: .init(group: group))
+    }
+
+    private func distanceToBottom(in collectionView: UICollectionView) -> CGFloat {
+        let visibleBottom =
+            collectionView.contentOffset.y + collectionView.bounds.height
+            - collectionView.adjustedContentInset.bottom
+        return max(0, collectionView.contentSize.height - visibleBottom)
     }
 
     private func renderContext(
@@ -925,6 +1161,38 @@ final class AgentTimelineTests: XCTestCase {
             imageProvider: imageProvider,
             actionSink: actionSink
         )
+    }
+}
+
+@MainActor
+private final class BlockCollectionDataSource: NSObject, UICollectionViewDataSource {
+    var ids: [AgentBlockID]
+
+    init(ids: [AgentBlockID]) {
+        self.ids = ids
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        numberOfItemsInSection section: Int
+    ) -> Int {
+        ids.count
+    }
+
+    func collectionView(
+        _ collectionView: UICollectionView,
+        cellForItemAt indexPath: IndexPath
+    ) -> UICollectionViewCell {
+        collectionView.dequeueReusableCell(withReuseIdentifier: "cell", for: indexPath)
+    }
+
+    func itemIdentifier(for indexPath: IndexPath) -> AgentBlockID? {
+        guard indexPath.section == 0, ids.indices.contains(indexPath.item) else { return nil }
+        return ids[indexPath.item]
+    }
+
+    func indexPath(for id: AgentBlockID) -> IndexPath? {
+        ids.firstIndex(of: id).map { IndexPath(item: $0, section: 0) }
     }
 }
 
