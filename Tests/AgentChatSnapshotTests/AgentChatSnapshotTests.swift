@@ -257,12 +257,22 @@ final class AgentChatSnapshotTests: XCTestCase {
                 perceptualPrecision: 0.84,
                 scale: traits.displayScale
             ),
-            named: name,
+            named: conversationSnapshotName(name),
             record: ProcessInfo.processInfo.environment["SNAPSHOT_RECORD"] == "1" ? .all : nil,
             file: file,
             testName: testName,
             line: line
         )
+    }
+
+    private func conversationSnapshotName(_ name: String) -> String {
+        // UIKit text and SF Symbols rasterization differs materially between the
+        // minimum supported Xcode toolchain and current Xcode releases.
+        #if compiler(<6.2)
+            return "\(name)-xcode16"
+        #else
+            return name
+        #endif
     }
 
     private func settleConversationRendering(
