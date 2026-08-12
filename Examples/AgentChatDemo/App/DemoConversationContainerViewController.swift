@@ -5,12 +5,19 @@ import UniformTypeIdentifiers
 
 @MainActor
 final class DemoConversationContainerViewController: UIViewController {
+    enum TimelineImplementation: Equatable {
+        case collectionView
+        case tableView
+    }
+
     private let scenario: DemoScenario
+    private let timelineImplementation: TimelineImplementation
+    private let toolPresentationStyle: AgentToolPresentationStyle
     private let playbackController: AgentScenarioPlaybackController
     private let scriptedEventCount: Int
     private let store: AgentConversationStore
     private let session: AgentChatSession
-    private let conversationController: AgentConversationViewController
+    private let conversationController: UIViewController
     private let imageProvider: DemoImageProvider
     private var usesDarkTheme = false
     private var pendingAttachments: [AgentAttachment] = []
@@ -19,9 +26,13 @@ final class DemoConversationContainerViewController: UIViewController {
 
     init(
         scenario: DemoScenario,
-        playbackController: AgentScenarioPlaybackController = .init()
+        playbackController: AgentScenarioPlaybackController = .init(),
+        timelineImplementation: TimelineImplementation = .collectionView,
+        toolPresentationStyle: AgentToolPresentationStyle = .capsule
     ) {
         self.scenario = scenario
+        self.timelineImplementation = timelineImplementation
+        self.toolPresentationStyle = toolPresentationStyle
         self.playbackController = playbackController
         let scenarioDefinition = scenario.makeScenario()
         self.scriptedEventCount = scenarioDefinition.events.count
@@ -42,19 +53,30 @@ final class DemoConversationContainerViewController: UIViewController {
         )
         let registry = AgentBlockRendererRegistry.default
         registry.register(DemoWeatherRenderer())
-        self.conversationController = AgentConversationViewController(
-            store: store,
-            configuration: .init(
-                runtimeCapabilities: [
-                    .streamingText, .tools, .commands, .fileOperations, .diffs,
-                    .approvals, .attachments, .history, .retry, .interrupt, .customBlocks,
-                ],
-                composerAccessories: Self.defaultAccessories,
-                composerContextDescription: "Demo",
-                imageProvider: imageProvider
-            ),
-            rendererRegistry: registry
+        let configuration = AgentConversationConfiguration(
+            runtimeCapabilities: [
+                .streamingText, .tools, .commands, .fileOperations, .diffs,
+                .approvals, .attachments, .history, .retry, .interrupt, .customBlocks,
+            ],
+            composerAccessories: Self.defaultAccessories,
+            composerContextDescription: "Demo",
+            imageProvider: imageProvider,
+            toolPresentationStyle: toolPresentationStyle
         )
+        switch timelineImplementation {
+        case .collectionView:
+            self.conversationController = AgentConversationViewController(
+                store: store,
+                configuration: configuration,
+                rendererRegistry: registry
+            )
+        case .tableView:
+            self.conversationController = AgentTableConversationViewController(
+                store: store,
+                configuration: configuration,
+                rendererRegistry: registry
+            )
+        }
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -68,9 +90,16 @@ final class DemoConversationContainerViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        title = scenario.rawValue
+        title =
+            timelineImplementation == .tableView
+            ? "\(scenario.rawValue) · TableView"
+            : scenario.rawValue
         view.backgroundColor = .systemBackground
-        conversationController.delegate = self
+        if let controller = conversationController as? AgentConversationViewController {
+            controller.delegate = self
+        } else if let controller = conversationController as? AgentTableConversationViewController {
+            controller.delegate = self
+        }
         addChild(conversationController)
         conversationController.view.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(conversationController.view)
@@ -82,7 +111,7 @@ final class DemoConversationContainerViewController: UIViewController {
         ])
         conversationController.didMove(toParent: self)
         configureDiagnosticsOverlay()
-        conversationController.actionHandler = { [session, weak self] action in
+        setActionHandler { [session, weak self] action in
             switch action {
             case .runtime(let command):
                 try await session.send(command)
@@ -97,6 +126,14 @@ final class DemoConversationContainerViewController: UIViewController {
             } catch {
                 self?.showError(error)
             }
+        }
+    }
+
+    private func setActionHandler(_ handler: @escaping AgentActionHandler) {
+        if let controller = conversationController as? AgentConversationViewController {
+            controller.actionHandler = handler
+        } else if let controller = conversationController as? AgentTableConversationViewController {
+            controller.actionHandler = handler
         }
     }
 
@@ -152,6 +189,41 @@ final class DemoConversationContainerViewController: UIViewController {
                 UIMenu(title: "Demo", options: .displayInline, children: [sample])
             )
         }
+
+        let alternateTimelineTitle =
+            timelineImplementation == .collectionView
+            ? "Open TableView Version"
+            : "Open CollectionView Version"
+        let alternateTimeline = UIAction(
+            title: alternateTimelineTitle,
+            image: UIImage(systemName: "rectangle.2.swap")
+        ) { [weak self] _ in
+            self?.openAlternateTimeline()
+        }
+        alternateTimeline.accessibilityIdentifier = "AgentChatDemoAlternateTimeline"
+        elements.append(
+            UIMenu(title: "Timeline", options: .displayInline, children: [alternateTimeline])
+        )
+
+        let appearanceActions: [UIAction] = [
+            (.capsule, "Capsule", "capsule"),
+            (.inline, "Inline", "list.bullet"),
+        ].map { style, title, icon in
+            UIAction(
+                title: title,
+                image: UIImage(systemName: icon),
+                state: toolPresentationStyle == style ? .on : .off
+            ) { [weak self] _ in
+                self?.openToolPresentation(style)
+            }
+        }
+        elements.append(
+            UIMenu(
+                title: "Tool Appearance",
+                options: [.displayInline, .singleSelection],
+                children: appearanceActions
+            )
+        )
 
         let scenarios = UIMenu(
             title: "Scenarios",
@@ -276,9 +348,40 @@ final class DemoConversationContainerViewController: UIViewController {
 
     private func openScenarioBrowser() {
         navigationController?.pushViewController(
-            ScenarioListViewController(),
+            ScenarioListViewController(
+                timelineImplementation: timelineImplementation,
+                toolPresentationStyle: toolPresentationStyle
+            ),
             animated: true
         )
+    }
+
+    private func openAlternateTimeline() {
+        let implementation: TimelineImplementation =
+            timelineImplementation == .collectionView
+            ? .tableView
+            : .collectionView
+        navigationController?.pushViewController(
+            DemoConversationContainerViewController(
+                scenario: scenario,
+                timelineImplementation: implementation,
+                toolPresentationStyle: toolPresentationStyle
+            ),
+            animated: true
+        )
+    }
+
+    private func openToolPresentation(_ style: AgentToolPresentationStyle) {
+        guard style != toolPresentationStyle else { return }
+        let replacement = DemoConversationContainerViewController(
+            scenario: scenario,
+            timelineImplementation: timelineImplementation,
+            toolPresentationStyle: style
+        )
+        guard var controllers = navigationController?.viewControllers, !controllers.isEmpty
+        else { return }
+        controllers[controllers.count - 1] = replacement
+        navigationController?.setViewControllers(controllers, animated: false)
     }
 
     private func rateAction(title: String, rate: Double, selectedRate: Double) -> UIAction {
@@ -290,12 +393,12 @@ final class DemoConversationContainerViewController: UIViewController {
     }
 
     private func configureDiagnosticsOverlay() {
-        let collectionView = conversationController.view.allDescendants
-            .compactMap { $0 as? UICollectionView }
-            .first
+        let timeline =
+            conversationController.view.allDescendants
+            .first { $0 is UICollectionView || $0 is UITableView } as? UIScrollView
         let overlay = DemoDiagnosticsOverlay(
             playbackController: playbackController,
-            collectionView: collectionView
+            scrollView: timeline
         )
         overlay.translatesAutoresizingMaskIntoConstraints = false
         overlay.isHidden = true
@@ -313,7 +416,9 @@ final class DemoConversationContainerViewController: UIViewController {
             let state = await playbackController.state()
             let replacement = DemoConversationContainerViewController(
                 scenario: scenario,
-                playbackController: .init(isPaused: startPaused, rate: state.rate)
+                playbackController: .init(isPaused: startPaused, rate: state.rate),
+                timelineImplementation: timelineImplementation,
+                toolPresentationStyle: toolPresentationStyle
             )
             var controllers = navigationController.viewControllers
             guard !controllers.isEmpty else { return }
@@ -366,7 +471,11 @@ final class DemoConversationContainerViewController: UIViewController {
     @objc private func toggleTheme() {
         usesDarkTheme.toggle()
         overrideUserInterfaceStyle = usesDarkTheme ? .dark : .light
-        conversationController.apply(theme: .system)
+        if let controller = conversationController as? AgentConversationViewController {
+            controller.apply(theme: .system)
+        } else if let controller = conversationController as? AgentTableConversationViewController {
+            controller.apply(theme: .system)
+        }
     }
 
     private func show(_ action: AgentHostAction) {
@@ -419,7 +528,7 @@ final class DemoConversationContainerViewController: UIViewController {
                     else { return }
                     self.composerAccessories[index].title = value
                     self.composerAccessories[index].isSelected = true
-                    self.conversationController.setComposerAccessories(self.composerAccessories)
+                    self.setComposerAccessories(self.composerAccessories)
                 })
         }
         sheet.addAction(UIAlertAction(title: "Cancel", style: .cancel))
@@ -433,7 +542,19 @@ final class DemoConversationContainerViewController: UIViewController {
         where !pendingAttachments.contains(where: { $0.id == attachment.id }) {
             pendingAttachments.append(attachment)
         }
-        conversationController.setComposerAttachments(pendingAttachments)
+        if let controller = conversationController as? AgentConversationViewController {
+            controller.setComposerAttachments(pendingAttachments)
+        } else if let controller = conversationController as? AgentTableConversationViewController {
+            controller.setComposerAttachments(pendingAttachments)
+        }
+    }
+
+    private func setComposerAccessories(_ accessories: [AgentComposerAccessory]) {
+        if let controller = conversationController as? AgentConversationViewController {
+            controller.setComposerAccessories(accessories)
+        } else if let controller = conversationController as? AgentTableConversationViewController {
+            controller.setComposerAccessories(accessories)
+        }
     }
 
     private func showError(_ error: any Error) {
@@ -502,6 +623,53 @@ extension DemoConversationContainerViewController: AgentConversationViewControll
 
     func conversationViewController(
         _ controller: AgentConversationViewController,
+        didUpdateDraftAttachments attachments: [AgentAttachment]
+    ) {
+        pendingAttachments = attachments
+    }
+}
+
+extension DemoConversationContainerViewController: AgentTableConversationViewControllerDelegate {
+    func tableConversationViewControllerDidRequestAttachments(
+        _ controller: AgentTableConversationViewController,
+        sourceView: UIView
+    ) {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+        picker.allowsMultipleSelection = true
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+
+    func tableConversationViewController(
+        _ controller: AgentTableConversationViewController,
+        didPaste itemProviders: [NSItemProvider],
+        sourceView: UIView
+    ) {
+        let attachments = itemProviders.enumerated().map { index, provider in
+            let typeIdentifier = provider.registeredTypeIdentifiers.first
+            let mediaType = typeIdentifier.flatMap(UTType.init)?.preferredMIMEType
+            return AgentAttachment(
+                id: .init(rawValue: "paste-\(UUID().uuidString)"),
+                name: provider.suggestedName ?? "Pasted item \(index + 1)",
+                mediaType: mediaType,
+                reference: .localIdentifier("demo-paste-\(UUID().uuidString)")
+            )
+        }
+        appendAttachments(attachments)
+    }
+
+    func tableConversationViewController(
+        _ controller: AgentTableConversationViewController,
+        didRequestRetryFor attachmentID: AgentAttachmentID
+    ) {
+        controller.setComposerAttachmentStatus(.uploading(progress: nil), for: attachmentID)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) {
+            controller.setComposerAttachmentStatus(.ready, for: attachmentID)
+        }
+    }
+
+    func tableConversationViewController(
+        _ controller: AgentTableConversationViewController,
         didUpdateDraftAttachments attachments: [AgentAttachment]
     ) {
         pendingAttachments = attachments

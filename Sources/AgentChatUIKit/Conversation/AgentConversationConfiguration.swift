@@ -28,6 +28,14 @@ public typealias AgentActionHandler =
     @MainActor @Sendable (AgentConversationAction) async throws
     -> Void
 
+/// The visual treatment used for compact activity and tool blocks.
+public enum AgentToolPresentationStyle: Hashable, Sendable {
+    /// A lightweight activity row that blends into the assistant message flow.
+    case inline
+    /// A bordered capsule with a persistent header and an attached detail region.
+    case capsule
+}
+
 /// Conversation presentation and input policy.
 @MainActor
 public struct AgentConversationConfiguration {
@@ -47,6 +55,8 @@ public struct AgentConversationConfiguration {
     public var allowsSendingWhileOffline: Bool
     /// Host-owned image resolver used by expanded image blocks.
     public var imageProvider: (any AgentImageProviding)?
+    /// Visual treatment for activity, command, file, image, and generic tool blocks.
+    public var toolPresentationStyle: AgentToolPresentationStyle
 
     /// Creates presentation policy.
     public init(
@@ -57,7 +67,8 @@ public struct AgentConversationConfiguration {
         composerAccessories: [AgentComposerAccessory] = [],
         composerContextDescription: String? = nil,
         allowsSendingWhileOffline: Bool = false,
-        imageProvider: (any AgentImageProviding)? = nil
+        imageProvider: (any AgentImageProviding)? = nil,
+        toolPresentationStyle: AgentToolPresentationStyle = .inline
     ) {
         self.runtimeCapabilities = runtimeCapabilities
         self.enablesKeyboardCommands = enablesKeyboardCommands
@@ -67,6 +78,7 @@ public struct AgentConversationConfiguration {
         self.composerContextDescription = composerContextDescription
         self.allowsSendingWhileOffline = allowsSendingWhileOffline
         self.imageProvider = imageProvider
+        self.toolPresentationStyle = toolPresentationStyle
     }
 }
 
@@ -123,6 +135,58 @@ extension AgentConversationViewControllerDelegate {
     /// Performs no draft attachment synchronization.
     public func conversationViewController(
         _ controller: AgentConversationViewController,
+        didUpdateDraftAttachments attachments: [AgentAttachment]
+    ) {}
+}
+
+/// Host callbacks for the UITableView-based conversation page.
+@MainActor
+public protocol AgentTableConversationViewControllerDelegate: AnyObject {
+    /// Requests host-provided attachment picking.
+    func tableConversationViewControllerDidRequestAttachments(
+        _ controller: AgentTableConversationViewController,
+        sourceView: UIView
+    )
+
+    /// Requests host import of non-text item providers pasted into the composer.
+    func tableConversationViewController(
+        _ controller: AgentTableConversationViewController,
+        didPaste itemProviders: [NSItemProvider],
+        sourceView: UIView
+    )
+
+    /// Requests another preparation attempt for a failed attachment.
+    func tableConversationViewController(
+        _ controller: AgentTableConversationViewController,
+        didRequestRetryFor attachmentID: AgentAttachmentID
+    )
+
+    /// Reports the latest draft attachments after composer-owned removal or submission.
+    func tableConversationViewController(
+        _ controller: AgentTableConversationViewController,
+        didUpdateDraftAttachments attachments: [AgentAttachment]
+    )
+}
+
+extension AgentTableConversationViewControllerDelegate {
+    public func tableConversationViewControllerDidRequestAttachments(
+        _ controller: AgentTableConversationViewController,
+        sourceView: UIView
+    ) {}
+
+    public func tableConversationViewController(
+        _ controller: AgentTableConversationViewController,
+        didPaste itemProviders: [NSItemProvider],
+        sourceView: UIView
+    ) {}
+
+    public func tableConversationViewController(
+        _ controller: AgentTableConversationViewController,
+        didRequestRetryFor attachmentID: AgentAttachmentID
+    ) {}
+
+    public func tableConversationViewController(
+        _ controller: AgentTableConversationViewController,
         didUpdateDraftAttachments attachments: [AgentAttachment]
     ) {}
 }

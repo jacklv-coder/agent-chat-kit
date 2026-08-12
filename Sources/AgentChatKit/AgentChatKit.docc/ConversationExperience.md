@@ -35,9 +35,51 @@ page.actionHandler = { action in
 Task { try await session.start() }
 ```
 
+``AgentTableConversationViewController`` provides the same Store, Composer, action routing, cells,
+history paging, and scroll policy on a traditional `UITableView`. Replace the controller type in the
+example above when the host prefers section/row updates and automatic row heights; keep the collection
+implementation when custom compositional layouts are required.
+
 The SDK page begins at the conversation boundary. The host still owns its sidebar or conversation
 list, selection and deep links, persistence, authentication, runtime construction, attachment bytes,
 URL policy, and image or artifact destinations.
+
+## Present tool activity
+
+Choose the compact inline treatment or an expandable capsule when constructing either conversation
+controller:
+
+```swift
+let page = AgentConversationViewController(
+    store: store,
+    configuration: .init(toolPresentationStyle: .capsule)
+)
+```
+
+Both styles consume the same ``AgentBlock`` lifecycle. Emit `.queued`, `.running`,
+`.waitingForApproval`, `.succeeded`, `.failed`, or `.cancelled` as the runtime changes state, and
+increment the block revision for every replacement. Capsule headers add progress, completion, failure,
+retry, and disclosure affordances without changing the runtime protocol.
+
+Command, search, file, image, and generic tool blocks derive a safe title and subtitle from their
+typed payload. An adapter can override those labels without creating a custom renderer by adding
+``AgentBlockMetadataKey/displayTitle``, ``AgentBlockMetadataKey/displaySubtitle``, and an optional
+``AgentBlockMetadataKey/expandedDetail`` to block metadata. Use
+``AgentBlockMetadataKey/activityKind`` with the value `reasoning` for a user-safe Thinking row. This
+row intentionally displays only the summary supplied by the runtime, never hidden model reasoning.
+
+```swift
+let block = AgentBlock(
+    id: "command-42",
+    kind: .command,
+    content: .command(commandPayload),
+    state: .running(progress: nil),
+    metadata: [
+        AgentBlockMetadataKey.displayTitle: .string("Running package tests"),
+        AgentBlockMetadataKey.displaySubtitle: .string("AgentChatKit · 32 tests"),
+    ]
+)
+```
 
 ## Honor the scroll contract
 
@@ -57,6 +99,11 @@ Compact tool and activity rows use the same direct update path: change `expanded
 that item without animation, and keep that cell's top at the same viewport position. Rapid disclosure
 requests coalesce while a model or height transaction is active. The detail stack simply participates
 in layout when expanded and is hidden when collapsed.
+
+The TableView implementation maps each turn to a section and each block to a row. Structural patches
+use explicit, non-animated `performBatchUpdates`; block revisions and disclosure changes reload only
+the affected rows with `.none`; parsed Markdown height changes use one empty self-sizing batch. Model,
+disclosure, and asynchronous height work still share one serialized update gate.
 
 Do not reach into the collection view to manage offsets from the host. The controller preserves a
 stable block identifier and viewport-relative offset when older turns are prepended, and falls back to
@@ -92,6 +139,9 @@ Run `Examples/AgentChatDemo` without launch arguments to inspect Complete Conver
 initial history, two cursor pages, manual reading during a streamed reply, Jump to Latest, tool
 disclosure, Markdown tables, image preview, and the rich composer without network, shell, model, or
 filesystem side effects. Test Lab adds deterministic offline and reconnect transitions.
+
+Open Test Lab and choose **Open TableView Version** to run the same scenario, runtime, input, image
+preview, and tool interactions on ``AgentTableConversationViewController``.
 
 Use Test Lab for isolated states and <doc:TestingScenarios> to add a fixture. A production adapter
 should pass reducer and integration tests for snapshot recovery, empty and non-empty history pages,

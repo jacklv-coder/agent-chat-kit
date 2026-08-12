@@ -27,9 +27,14 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                 isPaused: mode == "paused",
                 rate: rate
             )
+            let timeline: DemoConversationContainerViewController.TimelineImplementation =
+                process.environment["AGENTCHAT_TIMELINE"] == "table"
+                ? .tableView
+                : .collectionView
             rootController = DemoConversationContainerViewController(
                 scenario: scenario,
-                playbackController: playback
+                playbackController: playback,
+                timelineImplementation: timeline
             )
         } else {
             rootController = DemoConversationContainerViewController(

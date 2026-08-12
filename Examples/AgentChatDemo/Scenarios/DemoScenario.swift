@@ -7,6 +7,7 @@ enum DemoScenario: String, CaseIterable {
     case completeShowcase = "Complete Cell Showcase"
     case currentConversation = "Current Chat Replay"
     case basicStreaming = "Basic Streaming"
+    case thinkingLifecycle = "Thinking Lifecycle"
     case markdownShowcase = "Markdown Showcase"
     case fileSearch = "File Search"
     case shellCommand = "Shell Command"
@@ -46,6 +47,7 @@ enum DemoScenario: String, CaseIterable {
         case .completeShowcase: "Every built-in block plus custom, fallback, and interactive cells"
         case .currentConversation: "Real Chinese turns, Markdown, links, and tool activity cells"
         case .basicStreaming: "Revisioned Markdown deltas at a realistic cadence"
+        case .thinkingLifecycle: "Running and completed user-safe reasoning summaries"
         case .markdownShowcase: "Headings, lists, tables, links, quotes, and code"
         case .fileSearch: "Runtime-supplied file matches without file access"
         case .shellCommand: "Display-only command and sanitized output"
@@ -100,6 +102,7 @@ enum DemoScenario: String, CaseIterable {
         switch self {
         case .completeConversation: ["conversation", "streaming", "scrolling", "history"]
         case .basicStreaming: ["streaming", "markdown"]
+        case .thinkingLifecycle: ["lifecycle", "reasoning"]
         case .markdownShowcase, .chineseContent: ["markdown", "content"]
         case .completeShowcase, .currentConversation: ["showcase", "replay"]
         case .shellCommand, .longCommandOutput: ["tool", "command"]
@@ -286,6 +289,23 @@ enum DemoScenario: String, CaseIterable {
 
     private func contentBlocks() -> [AgentBlock] {
         switch self {
+        case .thinkingLifecycle:
+            [
+                block(
+                    id: "thinking",
+                    content: .activity(
+                        .init(
+                            title: "正在分析项目",
+                            detail: "正在检查项目结构、接入边界和下一步实现。"
+                        )
+                    ),
+                    state: .running(progress: nil),
+                    metadata: [
+                        AgentBlockMetadataKey.activityKind: .string("reasoning"),
+                        AgentBlockMetadataKey.displaySubtitle: .string("正在梳理检查步骤"),
+                    ]
+                )
+            ]
         case .markdownShowcase:
             [
                 block(
@@ -359,17 +379,21 @@ enum DemoScenario: String, CaseIterable {
             [
                 block(
                     id: "error",
-                    content: .error(
+                    content: .tool(
                         .init(
-                            failure: .init(
-                                code: "demo.failure",
-                                message: "The demo operation failed safely.",
-                                isRetryable: true
-                            )
+                            toolName: "package.publish",
+                            title: "Publish package",
+                            summary: "The operation failed safely before any remote change.",
+                            input: .object(["version": .string("1.0.0")])
                         )
                     ),
                     state: .failed(
-                        .init(code: "demo.failure", message: "Failed", isRetryable: true))
+                        .init(code: "demo.failure", message: "Publish failed", isRetryable: true)
+                    ),
+                    metadata: [
+                        AgentBlockMetadataKey.displayTitle: .string("Failed to publish package"),
+                        AgentBlockMetadataKey.displaySubtitle: .string("Retry available"),
+                    ]
                 )
             ]
         case .interrupt:
@@ -477,7 +501,11 @@ enum DemoScenario: String, CaseIterable {
                             title: "已检查完整会话页面",
                             detail: "消息列表、输入区和运行状态由同一个会话控制器协调。"
                         )
-                    )
+                    ),
+                    metadata: [
+                        AgentBlockMetadataKey.activityKind: .string("reasoning"),
+                        AgentBlockMetadataKey.displaySubtitle: .string("思考了 1.0 秒"),
+                    ]
                 ),
                 block(
                     id: "complete-conversation-search",
@@ -507,7 +535,11 @@ enum DemoScenario: String, CaseIterable {
                             exitCode: 0,
                             duration: 0.8
                         )
-                    )
+                    ),
+                    metadata: [
+                        AgentBlockMetadataKey.displayTitle: .string("已运行时间线测试"),
+                        AgentBlockMetadataKey.displaySubtitle: .string("32 项通过 · 0.8s"),
+                    ]
                 ),
                 block(
                     id: "complete-conversation-summary",
@@ -1135,14 +1167,16 @@ enum DemoScenario: String, CaseIterable {
     private func block(
         id: AgentBlockID,
         content: AgentBlockContent,
-        state: AgentBlockState = .succeeded
+        state: AgentBlockState = .succeeded,
+        metadata: [String: JSONValue] = [:]
     ) -> AgentBlock {
         AgentBlock(
             id: id,
             kind: kind(for: content),
             content: content,
             state: state,
-            createdAt: Date(timeIntervalSince1970: 0)
+            createdAt: Date(timeIntervalSince1970: 0),
+            metadata: metadata
         )
     }
 

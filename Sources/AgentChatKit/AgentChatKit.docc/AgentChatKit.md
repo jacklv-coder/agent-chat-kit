@@ -35,6 +35,9 @@ scrolling contract, then use <doc:RuntimeAdapter> to connect a real runtime. Use
 ### Presentation
 
 - ``AgentConversationViewController``
+- ``AgentTableConversationViewController``
 - ``AgentConversationConfiguration``
+- ``AgentToolPresentationStyle``
+- ``AgentBlockMetadataKey``
 - ``AgentComposerState``
 - ``AgentComposerAccessory``

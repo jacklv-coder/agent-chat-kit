@@ -731,7 +731,8 @@ final class AgentTimelineTests: XCTestCase {
                 return leftY < rightY
             }
         )
-        let anchoredBlockID = initialTurns[firstVisiblePath.section].blocks[firstVisiblePath.item].id
+        let anchoredBlockID = initialTurns[firstVisiblePath.section].blocks[firstVisiblePath.item]
+            .id
         let originalAttributes = try XCTUnwrap(
             collectionView.layoutAttributesForItem(at: firstVisiblePath)
         )
@@ -775,6 +776,307 @@ final class AgentTimelineTests: XCTestCase {
 
         XCTAssertEqual(collectionView.numberOfSections, initialTurns.count + olderTurns.count)
         XCTAssertEqual(restoredViewportOffset, originalViewportOffset, accuracy: 1)
+    }
+
+    func testTableControllerMapsTurnsToSectionsAndBlocksToRows() throws {
+        let date = Date(timeIntervalSince1970: 0)
+        let first = AgentTurn(
+            id: "table-first-turn",
+            role: .user,
+            blocks: [
+                AgentBlock(
+                    id: "table-user",
+                    kind: .userText,
+                    content: .userText(.init(text: "Hello")),
+                    state: .succeeded,
+                    createdAt: date
+                )
+            ],
+            state: .completed,
+            createdAt: date
+        )
+        let second = AgentTurn(
+            id: "table-second-turn",
+            role: .assistant,
+            blocks: [
+                AgentBlock(
+                    id: "table-thinking",
+                    kind: .activity,
+                    content: .activity(.init(title: "Thinking")),
+                    state: .running(progress: nil),
+                    createdAt: date
+                ),
+                AgentBlock(
+                    id: "table-answer",
+                    kind: .markdown,
+                    content: .markdown(.init(markdown: "Answer", isFinal: true)),
+                    state: .succeeded,
+                    createdAt: date
+                ),
+            ],
+            state: .completed,
+            createdAt: date
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(id: "table-mapping", turns: [first, second])
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+
+        XCTAssertEqual(tableView.numberOfSections, 2)
+        XCTAssertEqual(tableView.numberOfRows(inSection: 0), 1)
+        XCTAssertEqual(tableView.numberOfRows(inSection: 1), 2)
+        XCTAssertTrue(
+            tableView.cellForRow(at: .init(row: 0, section: 1)) is AgentTableBlockCell
+        )
+    }
+
+    func testTableControllerPinsBottomAfterInsertionAndMarkdownHeightChange() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        func turn(_ index: Int) -> AgentTurn {
+            AgentTurn(
+                id: .init(rawValue: "table-bottom-turn-\(index)"),
+                role: .assistant,
+                blocks: [
+                    AgentBlock(
+                        id: .init(rawValue: "table-bottom-block-\(index)"),
+                        kind: .activity,
+                        content: .activity(.init(title: "Message \(index)")),
+                        state: .succeeded,
+                        createdAt: date
+                    )
+                ],
+                state: .completed,
+                createdAt: date
+            )
+        }
+        let initialTurns = (0..<18).map(turn)
+        let store = AgentConversationStore(
+            snapshot: .init(id: "table-bottom", turns: initialTurns)
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        tableView.layoutIfNeeded()
+
+        let markdown = AgentBlock(
+            id: "table-bottom-markdown",
+            kind: .markdown,
+            content: .markdown(
+                .init(
+                    markdown: """
+                        | Feature | Result |
+                        | --- | --- |
+                        | UITableView | Ready |
+                        | Streaming | Stable |
+
+                        \(String(repeating: "A taller parsed answer.\n", count: 10))
+                        """,
+                    isFinal: true
+                )
+            ),
+            state: .succeeded,
+            createdAt: date
+        )
+        let inserted = AgentTurn(
+            id: "table-bottom-inserted",
+            role: .assistant,
+            blocks: [markdown],
+            state: .completed,
+            createdAt: date
+        )
+        var updated = store.snapshot
+        updated.turns.append(inserted)
+        store.apply(
+            .init(
+                snapshot: updated,
+                patches: [.insertTurn(inserted.id, index: initialTurns.count)]
+            )
+        )
+
+        try await Task.sleep(for: .milliseconds(250))
+        if let cell = tableView.cellForRow(
+            at: .init(row: 0, section: initialTurns.count)
+        ) as? AgentTableBlockCell {
+            await cell.waitForPendingRendering()
+        }
+        try await Task.sleep(for: .milliseconds(100))
+        tableView.layoutIfNeeded()
+        let visibleBottom =
+            tableView.contentOffset.y + tableView.bounds.height
+            - tableView.adjustedContentInset.bottom
+
+        XCTAssertEqual(tableView.numberOfSections, initialTurns.count + 1)
+        XCTAssertEqual(max(0, tableView.contentSize.height - visibleBottom), 0, accuracy: 1)
+        XCTAssertNotNil(
+            tableView.cellForRow(at: .init(row: 0, section: initialTurns.count))
+        )
+    }
+
+    func testTableControllerSerializesExpansionWithStructuralInsertion() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        var output = AgentTextBuffer()
+        output.append((0..<6).map { "table queued output \($0)" }.joined(separator: "\n"))
+        let command = AgentBlock(
+            id: "table-serialized-command",
+            kind: .command,
+            content: .command(.init(command: "swift test", output: output, exitCode: 0)),
+            state: .succeeded,
+            createdAt: date
+        )
+        let initialTurn = AgentTurn(
+            id: "table-serialized-turn",
+            role: .assistant,
+            blocks: [command],
+            state: .completed,
+            createdAt: date
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(id: "table-serialized", turns: [initialTurn])
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        tableView.layoutIfNeeded()
+        let path = IndexPath(row: 0, section: 0)
+        let cell = try XCTUnwrap(tableView.cellForRow(at: path) as? AgentTableBlockCell)
+        let collapsedHeight = cell.frame.height
+        let header = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventHeader"
+            } as? UIControl
+        )
+
+        header.sendActions(for: .touchUpInside)
+        header.sendActions(for: .touchUpInside)
+
+        let insertedBlock = AgentBlock(
+            id: "table-serialized-result",
+            kind: .activity,
+            content: .activity(.init(title: "Inserted during table disclosure")),
+            state: .succeeded,
+            createdAt: date
+        )
+        let insertedTurn = AgentTurn(
+            id: "table-serialized-inserted-turn",
+            role: .assistant,
+            blocks: [insertedBlock],
+            state: .completed,
+            createdAt: date
+        )
+        var updated = store.snapshot
+        updated.turns.append(insertedTurn)
+        store.apply(
+            .init(snapshot: updated, patches: [.insertTurn(insertedTurn.id, index: 1)])
+        )
+
+        try await Task.sleep(for: .milliseconds(250))
+        controller.view.layoutIfNeeded()
+        tableView.layoutIfNeeded()
+
+        XCTAssertEqual(tableView.numberOfSections, 2)
+        XCTAssertNotNil(tableView.cellForRow(at: .init(row: 0, section: 1)))
+        let finalCell = try XCTUnwrap(tableView.cellForRow(at: path) as? AgentTableBlockCell)
+        let details = try XCTUnwrap(
+            finalCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventDetails"
+            }
+        )
+        XCTAssertTrue(details.isHidden)
+        XCTAssertEqual(finalCell.frame.height, collapsedHeight, accuracy: 1)
+        XCTAssertNil(tableView.layer.animationKeys())
+    }
+
+    func testTableControllerPreservesVisibleBlockWhenHistoryIsPrepended() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        func turn(prefix: String, index: Int) -> AgentTurn {
+            AgentTurn(
+                id: .init(rawValue: "table-\(prefix)-turn-\(index)"),
+                role: .assistant,
+                blocks: [
+                    AgentBlock(
+                        id: .init(rawValue: "table-\(prefix)-block-\(index)"),
+                        kind: .activity,
+                        content: .activity(.init(title: "\(prefix) message \(index)")),
+                        state: .succeeded,
+                        createdAt: date
+                    )
+                ],
+                state: .completed,
+                createdAt: date
+            )
+        }
+        let initialTurns = (0..<24).map { turn(prefix: "current", index: $0) }
+        let store = AgentConversationStore(
+            snapshot: .init(
+                id: "table-history",
+                turns: initialTurns,
+                earlierHistoryCursor: "older",
+                hasEarlierHistory: true
+            )
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        tableView.scrollToRow(at: .init(row: 0, section: 9), at: .top, animated: false)
+        tableView.layoutIfNeeded()
+        let firstVisible = try XCTUnwrap(
+            tableView.indexPathsForVisibleRows?.min {
+                tableView.rectForRow(at: $0).minY < tableView.rectForRow(at: $1).minY
+            }
+        )
+        let anchoredBlockID = initialTurns[firstVisible.section].blocks[firstVisible.row].id
+        let originalOffset =
+            tableView.rectForRow(at: firstVisible).minY
+            - tableView.contentOffset.y
+            - tableView.adjustedContentInset.top
+
+        let older = (0..<5).map { turn(prefix: "older", index: $0) }
+        var updated = store.snapshot
+        updated.turns.insert(contentsOf: older, at: 0)
+        updated.hasEarlierHistory = false
+        updated.earlierHistoryCursor = nil
+        store.apply(
+            .init(
+                snapshot: updated,
+                patches: [.prependTurns(older.map(\.id)), .historyStateChanged]
+            )
+        )
+
+        try await Task.sleep(for: .milliseconds(200))
+        tableView.layoutIfNeeded()
+        let section = try XCTUnwrap(
+            updated.turns.firstIndex { $0.blocks.contains { $0.id == anchoredBlockID } }
+        )
+        let restored = IndexPath(row: 0, section: section)
+        let restoredOffset =
+            tableView.rectForRow(at: restored).minY
+            - tableView.contentOffset.y
+            - tableView.adjustedContentInset.top
+
+        XCTAssertEqual(tableView.numberOfSections, initialTurns.count + older.count)
+        XCTAssertEqual(restoredOffset, originalOffset, accuracy: 1)
     }
 
     func testControllerDefensivelyFiltersDuplicateStableIdentifiers() {
@@ -942,6 +1244,272 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertEqual(receivedAction, .toggleExpanded(block.id))
     }
 
+    func testCapsuleCommandUsesDirectTerminalIconAndStructuredHeader() throws {
+        var output = AgentTextBuffer()
+        output.append("Build Succeeded\n")
+        let block = AgentBlock(
+            id: "capsule-command",
+            kind: .command,
+            content: .command(
+                .init(
+                    command: "xcodebuild -scheme AgentChatDemo",
+                    output: output,
+                    exitCode: 0,
+                    duration: 7.2
+                )
+            ),
+            state: .succeeded,
+            createdAt: .distantPast,
+            metadata: [
+                AgentBlockMetadataKey.displayTitle: .string("Build demo application"),
+                AgentBlockMetadataKey.displaySubtitle: .string("xcodebuild · 7.2s"),
+            ]
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.command])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 390, height: 844),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(
+                turn: turn,
+                block: block,
+                expandedBlockIDs: [block.id],
+                toolPresentationStyle: .capsule
+            )
+        )
+        let event = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEvent"
+            }
+        )
+        let icon = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventIcon"
+            } as? UIImageView
+        )
+        let title = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventTitle"
+            } as? UILabel
+        )
+        let subtitle = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventSubtitle"
+            } as? UILabel
+        )
+
+        XCTAssertEqual(event.layer.cornerRadius, 14)
+        XCTAssertEqual(icon.image, UIImage(systemName: "apple.terminal"))
+        XCTAssertEqual(title.text, "Build demo application")
+        XCTAssertEqual(subtitle.text, "xcodebuild · 7.2s")
+        let header = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventHeader"
+            }
+        )
+        XCTAssertTrue(header.accessibilityLabel?.contains("xcodebuild · 7.2s") == true)
+        XCTAssertTrue(header.accessibilityLabel?.contains(AgentStrings.succeeded) == true)
+        XCTAssertNotNil(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventDetails"
+            }
+        )
+    }
+
+    func testCapsuleToolRendersExpandedDetailMetadata() throws {
+        let detail = "Checked package targets and dependency boundaries."
+        let block = AgentBlock(
+            id: "tool-detail",
+            kind: .tool,
+            content: .tool(.init(toolName: "repository.inspect", title: "Inspect repository")),
+            state: .succeeded,
+            createdAt: .distantPast,
+            metadata: [AgentBlockMetadataKey.expandedDetail: .string(detail)]
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.tool])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 390, height: 844),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(
+                turn: turn,
+                block: block,
+                expandedBlockIDs: [block.id],
+                toolPresentationStyle: .capsule
+            )
+        )
+
+        XCTAssertNotNil(
+            cell.contentView.allSubviews.first {
+                ($0 as? UILabel)?.text == detail
+            }
+        )
+    }
+
+    func testReasoningActivityKeepsInlineThinkingTreatmentInCapsuleMode() throws {
+        let block = AgentBlock(
+            id: "reasoning",
+            kind: .activity,
+            content: .activity(.init(title: "Runtime reasoning", detail: "Safe summary")),
+            state: .running(progress: nil),
+            createdAt: .distantPast,
+            metadata: [AgentBlockMetadataKey.activityKind: .string("reasoning")]
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .running,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.activity])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 390, height: 844),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(
+                turn: turn,
+                block: block,
+                toolPresentationStyle: .capsule
+            )
+        )
+        let event = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEvent"
+            }
+        )
+        let title = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventTitle"
+            } as? UILabel
+        )
+
+        XCTAssertEqual(event.layer.cornerRadius, 0)
+        XCTAssertEqual(title.text, AgentStrings.thinking)
+    }
+
+    func testCapsuleFailureExposesRetryAndRoutesTheBlockID() throws {
+        let block = AgentBlock(
+            id: "failed-tool",
+            kind: .tool,
+            content: .tool(
+                .init(toolName: "package.publish", title: "Publish package")
+            ),
+            state: .failed(
+                .init(code: "publish.failed", message: "Publish failed", isRetryable: true)
+            ),
+            createdAt: .distantPast
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.tool])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 390, height: 844),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        var receivedAction: AgentBlockUIAction?
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(
+                turn: turn,
+                block: block,
+                canRetry: true,
+                toolPresentationStyle: .capsule,
+                actionSink: .init { receivedAction = $0 }
+            )
+        )
+        let retry = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventRetry"
+            } as? UIButton
+        )
+
+        retry.sendActions(for: .touchUpInside)
+
+        XCTAssertEqual(receivedAction, .retry(block.id))
+        let header = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventHeader"
+            } as? AgentCompactEventHeaderControl
+        )
+        let retryAccessibilityAction = try XCTUnwrap(header.accessibilityCustomActions?.first)
+        XCTAssertEqual(retryAccessibilityAction.name, AgentStrings.retry)
+    }
+
+    func testCapsuleFailureHidesRetryWhenRuntimeDoesNotSupportIt() throws {
+        let block = AgentBlock(
+            id: "failed-tool",
+            kind: .tool,
+            content: .tool(.init(toolName: "package.publish", title: "Publish package")),
+            state: .failed(
+                .init(code: "publish.failed", message: "Publish failed", isRetryable: true)
+            ),
+            createdAt: .distantPast
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.tool])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 390, height: 844),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(
+                turn: turn,
+                block: block,
+                canRetry: false,
+                toolPresentationStyle: .capsule
+            )
+        )
+
+        XCTAssertNil(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventRetry"
+            }
+        )
+    }
+
     func testMarkdownTableUsesNativeScrollableGrid() async {
         let block = AgentBlock(
             id: "markdown-table",
@@ -992,6 +1560,87 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertEqual(cells.count, 12)
         XCTAssertEqual(table?.alwaysBounceHorizontal, true)
         XCTAssertGreaterThan(table?.intrinsicContentSize.height ?? 0, 44)
+    }
+
+    func testMarkdownContentUsesTheSameHorizontalBaselineAsCompactRows() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        let activity = AgentBlock(
+            id: "activity-baseline",
+            kind: .activity,
+            content: .activity(.init(title: "Compact row")),
+            state: .succeeded,
+            createdAt: date
+        )
+        let markdown = AgentBlock(
+            id: "markdown-baseline",
+            kind: .markdown,
+            content: .markdown(
+                .init(
+                    markdown: """
+                        # Baseline
+
+                        | Feature | Status |
+                        | --- | --- |
+                        | Spacing | Aligned |
+                        """,
+                    isFinal: true
+                )
+            ),
+            state: .succeeded,
+            createdAt: date
+        )
+        let turn = AgentTurn(
+            id: "baseline-turn",
+            role: .assistant,
+            blocks: [activity, markdown],
+            state: .completed,
+            createdAt: date
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(id: "baseline-conversation", turns: [turn])
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        tableView.layoutIfNeeded()
+        let activityCell = try XCTUnwrap(
+            tableView.cellForRow(at: .init(row: 0, section: 0)) as? AgentTableBlockCell
+        )
+        let markdownCell = try XCTUnwrap(
+            tableView.cellForRow(at: .init(row: 1, section: 0)) as? AgentTableBlockCell
+        )
+        await markdownCell.waitForPendingRendering()
+        tableView.performBatchUpdates(nil)
+        tableView.layoutIfNeeded()
+
+        let activityHeader = try XCTUnwrap(
+            activityCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventHeader"
+            }
+        )
+        let markdownView = try XCTUnwrap(
+            markdownCell.contentView.allSubviews.first { $0 is AgentMarkdownContentView }
+        )
+        let markdownTable = try XCTUnwrap(
+            markdownCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentMarkdownTable"
+            }
+        )
+        let activityLeading = activityHeader.convert(activityHeader.bounds, to: tableView).minX
+        let markdownLeading = markdownView.convert(markdownView.bounds, to: tableView).minX
+        let tableFrame = markdownTable.convert(markdownTable.bounds, to: tableView)
+
+        XCTAssertEqual(activityLeading, 16, accuracy: 1)
+        XCTAssertEqual(markdownLeading, activityLeading, accuracy: 1)
+        XCTAssertEqual(tableFrame.minX, markdownLeading, accuracy: 1)
+        XCTAssertEqual(tableFrame.maxX, tableView.bounds.width - 16, accuracy: 1)
+        XCTAssertFalse(activityCell.isAccessibilityElement)
+        XCTAssertFalse(markdownCell.isAccessibilityElement)
     }
 
     func testExpandedImageLoadsProviderPreview() async {
@@ -1324,6 +1973,8 @@ final class AgentTimelineTests: XCTestCase {
         block: AgentBlock,
         expandedBlockIDs: Set<AgentBlockID> = [],
         imageProvider: (any AgentImageProviding)? = nil,
+        canRetry: Bool = false,
+        toolPresentationStyle: AgentToolPresentationStyle = .inline,
         actionSink: AgentBlockActionSink = .init { _ in }
     ) -> AgentBlockRenderContext {
         AgentBlockRenderContext(
@@ -1335,7 +1986,9 @@ final class AgentTimelineTests: XCTestCase {
             environment: .init(
                 contentSizeCategory: UIContentSizeCategory.large.rawValue,
                 reduceMotionEnabled: false,
-                expandedBlockIDs: expandedBlockIDs
+                expandedBlockIDs: expandedBlockIDs,
+                canRetry: canRetry,
+                toolPresentationStyle: toolPresentationStyle
             ),
             imageProvider: imageProvider,
             actionSink: actionSink

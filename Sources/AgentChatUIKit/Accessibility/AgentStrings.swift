@@ -3,6 +3,8 @@ import Foundation
 enum AgentStrings {
     static var input: String { String(localized: "Input", bundle: .module) }
     static var output: String { String(localized: "Output", bundle: .module) }
+    static var image: String { String(localized: "Image", bundle: .module) }
+    static var results: String { String(localized: "results", bundle: .module) }
     static var payload: String { String(localized: "Payload", bundle: .module) }
     static var command: String { String(localized: "Command", bundle: .module) }
     static var fileSearch: String { String(localized: "File search", bundle: .module) }
@@ -52,4 +54,12 @@ enum AgentStrings {
     static var moved: String { String(localized: "Moved", bundle: .module) }
     static var ran: String { String(localized: "Ran", bundle: .module) }
     static var read: String { String(localized: "Read", bundle: .module) }
+    static var thinking: String { String(localized: "Thinking", bundle: .module) }
+    static var thought: String { String(localized: "Thought", bundle: .module) }
+    static var thinkingFailed: String {
+        String(localized: "Thinking failed", bundle: .module)
+    }
+    static var thinkingCancelled: String {
+        String(localized: "Thinking cancelled", bundle: .module)
+    }
 }

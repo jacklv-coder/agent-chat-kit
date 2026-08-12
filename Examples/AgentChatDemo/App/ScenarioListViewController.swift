@@ -1,7 +1,25 @@
+import AgentChatKit
 import UIKit
 
 @MainActor
 final class ScenarioListViewController: UITableViewController {
+    private let timelineImplementation:
+        DemoConversationContainerViewController.TimelineImplementation
+    private let toolPresentationStyle: AgentToolPresentationStyle
+
+    init(
+        timelineImplementation: DemoConversationContainerViewController.TimelineImplementation =
+            .collectionView,
+        toolPresentationStyle: AgentToolPresentationStyle = .capsule
+    ) {
+        self.timelineImplementation = timelineImplementation
+        self.toolPresentationStyle = toolPresentationStyle
+        super.init(style: .plain)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Test Lab"
@@ -33,7 +51,9 @@ final class ScenarioListViewController: UITableViewController {
         tableView.deselectRow(at: indexPath, animated: true)
         navigationController?.pushViewController(
             DemoConversationContainerViewController(
-                scenario: DemoScenario.allCases[indexPath.row]
+                scenario: DemoScenario.allCases[indexPath.row],
+                timelineImplementation: timelineImplementation,
+                toolPresentationStyle: toolPresentationStyle
             ),
             animated: true
         )

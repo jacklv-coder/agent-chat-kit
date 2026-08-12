@@ -4,7 +4,7 @@ import UIKit
 @MainActor
 final class DemoDiagnosticsOverlay: UILabel {
     private let playbackController: AgentScenarioPlaybackController
-    private weak var collectionView: UICollectionView?
+    private weak var scrollView: UIScrollView?
     private var displayLink: CADisplayLink?
     private var refreshTimer: Timer?
     private var frameCount = 0
@@ -15,10 +15,10 @@ final class DemoDiagnosticsOverlay: UILabel {
 
     init(
         playbackController: AgentScenarioPlaybackController,
-        collectionView: UICollectionView?
+        scrollView: UIScrollView?
     ) {
         self.playbackController = playbackController
-        self.collectionView = collectionView
+        self.scrollView = scrollView
         super.init(frame: .zero)
         font = .monospacedDigitSystemFont(ofSize: 11, weight: .medium)
         textColor = .label
@@ -106,9 +106,9 @@ final class DemoDiagnosticsOverlay: UILabel {
     }
 
     @objc private func refresh() {
-        if let collectionView {
-            let contentSize = collectionView.contentSize
-            let isInteracting = collectionView.isDragging || collectionView.isDecelerating
+        if let scrollView {
+            let contentSize = scrollView.contentSize
+            let isInteracting = scrollView.isDragging || scrollView.isDecelerating
             if isInteracting, lastContentSize != .zero,
                 abs(contentSize.height - lastContentSize.height) > 2
             {

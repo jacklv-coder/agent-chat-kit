@@ -226,6 +226,58 @@ final class AgentSessionIntegrationTests: XCTestCase {
         await session.stop()
     }
 
+    func testMockRuntimeIgnoresRetryForSucceededBlock() async throws {
+        let conversationID: AgentConversationID = "retry-ineligible"
+        let date = Date(timeIntervalSince1970: 0)
+        let block = AgentBlock(
+            id: "already-succeeded",
+            kind: .tool,
+            content: .tool(.init(toolName: "repository.inspect", title: "Inspect repository")),
+            state: .succeeded,
+            createdAt: date
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: date
+        )
+        let runtime = MockAgentRuntime(
+            scenario: .init(
+                events: [
+                    .init(
+                        event: .init(
+                            id: "snapshot",
+                            sequence: 1,
+                            conversationID: conversationID,
+                            timestamp: date,
+                            payload: .snapshot(
+                                .init(id: conversationID, turns: [turn])
+                            )
+                        ),
+                        delayNanoseconds: 0
+                    )
+                ]
+            )
+        )
+        let store = AgentConversationStore(snapshot: .empty(conversationID: conversationID))
+        let session = AgentChatSession(
+            adapter: runtime,
+            configuration: .init(conversationID: conversationID),
+            store: store
+        )
+        try await session.start()
+        try await waitForState { store.snapshot.turns.first?.blocks.first?.id == block.id }
+
+        try await session.send(
+            .retry(.init(conversationID: conversationID, blockID: block.id))
+        )
+
+        XCTAssertEqual(store.snapshot.turns.first?.blocks.first, block)
+        await session.stop()
+    }
+
     func testStreamFailureRetainsSnapshotAndMarksStoreOffline() async throws {
         let conversationID: AgentConversationID = "disconnect"
         let snapshot = AgentConversationSnapshot(

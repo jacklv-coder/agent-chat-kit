@@ -199,7 +199,11 @@ private actor MockConnectionController {
                     )
                 ),
                 state: .running(progress: nil),
-                createdAt: nextCommandTimestamp
+                createdAt: nextCommandTimestamp,
+                metadata: [
+                    AgentBlockMetadataKey.activityKind: .string("reasoning"),
+                    AgentBlockMetadataKey.displaySubtitle: .string("正在梳理检查步骤"),
+                ]
             )
             await emitGenerated(
                 conversationID: request.conversationID,
@@ -253,6 +257,27 @@ private actor MockConnectionController {
             await emitGenerated(
                 conversationID: request.conversationID,
                 payload: .turnUpdated(lastTurn)
+            )
+
+        case .retry(let request):
+            guard let blockID = request.blockID,
+                let turn = latestSnapshot.turns.first(where: { turn in
+                    turn.blocks.contains(where: { $0.id == blockID })
+                }),
+                var block = turn.blocks.first(where: { $0.id == blockID }),
+                case .failed(let failure) = block.state,
+                failure.isRetryable
+            else { return }
+            block.state = .succeeded
+            block.revision += 1
+            block.updatedAt = nextCommandTimestamp
+            if case .tool(let tool) = block.content {
+                block.metadata[AgentBlockMetadataKey.displayTitle] = .string(tool.title)
+            }
+            block.metadata[AgentBlockMetadataKey.displaySubtitle] = .string("Retry succeeded")
+            await emitGenerated(
+                conversationID: request.conversationID,
+                payload: .blockReplaced(turnID: turn.id, block: block)
             )
 
         case .loadEarlier(let request):
@@ -338,7 +363,14 @@ private actor MockConnectionController {
                     ),
                     state: .succeeded,
                     revision: 1,
-                    createdAt: thinkingCreatedAt
+                    createdAt: thinkingCreatedAt,
+                    metadata: [
+                        AgentBlockMetadataKey.activityKind: .string("reasoning"),
+                        AgentBlockMetadataKey.displaySubtitle: .string("思考了 1.0 秒"),
+                        AgentBlockMetadataKey.expandedDetail: .string(
+                            "已生成用户安全的推理摘要；不会展示私有思维链。"
+                        ),
+                    ]
                 )
             )
         )
@@ -390,7 +422,11 @@ private actor MockConnectionController {
                         .init(command: "swift test --filter AgentTimelineTests")
                     ),
                     state: .running(progress: nil),
-                    createdAt: commandCreatedAt
+                    createdAt: commandCreatedAt,
+                    metadata: [
+                        AgentBlockMetadataKey.displayTitle: .string("运行时间线测试"),
+                        AgentBlockMetadataKey.displaySubtitle: .string("swift test · 正在运行"),
+                    ]
                 )
             )
         )
@@ -430,7 +466,11 @@ private actor MockConnectionController {
                     ),
                     state: .succeeded,
                     revision: 2,
-                    createdAt: commandCreatedAt
+                    createdAt: commandCreatedAt,
+                    metadata: [
+                        AgentBlockMetadataKey.displayTitle: .string("已运行时间线测试"),
+                        AgentBlockMetadataKey.displaySubtitle: .string("32 项通过 · 0.7s"),
+                    ]
                 )
             )
         )

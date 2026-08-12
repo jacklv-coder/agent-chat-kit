@@ -71,3 +71,8 @@ For disclosure regressions, assert that a visible tool row reconfigures without 
 the tapped header at the same viewport position, updates accessibility state, and resolves the expanded
 or collapsed self-sizing height within one serialized transaction. Also enqueue a structural insertion
 during rapid disclosure changes to verify that collection batches never overlap.
+
+Run the same controller-level cases against ``AgentTableConversationViewController``. Assert the
+turn-to-section and block-to-row mapping, a bottom insertion followed by parsed Markdown height growth,
+rapid disclosure during a structural insertion, and viewport preservation after history sections are
+prepended.

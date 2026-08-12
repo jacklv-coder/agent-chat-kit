@@ -47,11 +47,6 @@ final class AgentChatDemoUITests: XCTestCase {
         waitForExpectations(timeout: 5)
         send.tap()
 
-        let thinking = app.cells.matching(
-            NSPredicate(format: "label CONTAINS %@", "思考")
-        ).firstMatch
-        XCTAssertTrue(thinking.waitForExistence(timeout: 3))
-
         let response = app.cells.matching(
             NSPredicate(format: "label CONTAINS %@", "Demo 实时响应")
         ).firstMatch
@@ -62,6 +57,51 @@ final class AgentChatDemoUITests: XCTestCase {
             .matching(NSPredicate(format: "label CONTAINS %@", "Markdown 表格"))
             .firstMatch
         XCTAssertTrue(tableResult.waitForExistence(timeout: 5))
+    }
+
+    func testThinkingLifecycleShowsRunningReasoningRow() {
+        continueAfterFailure = false
+        let app = makeApp(scenario: "thinking-lifecycle")
+        app.launch()
+
+        let thinking = app.buttons.matching(
+            NSPredicate(
+                format: "identifier == %@ AND label == %@",
+                "AgentActivityEventHeader",
+                "Thinking"
+            )
+        ).firstMatch
+        XCTAssertTrue(thinking.waitForExistence(timeout: 10))
+    }
+
+    func testCapsuleCommandExpandsFromTheWholeHeader() {
+        continueAfterFailure = false
+        let app = makeApp(scenario: "shell-command")
+        app.launch()
+
+        let header = app.buttons["AgentActivityEventHeader"]
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        XCTAssertEqual(header.value as? String, "Expand")
+
+        header.tap()
+
+        XCTAssertTrue(app.descendants(matching: .any)["AgentActivityEventDetails"].exists)
+        XCTAssertEqual(header.value as? String, "Collapse")
+    }
+
+    func testFailedCapsuleCanRetryToSuccess() {
+        continueAfterFailure = false
+        let app = makeApp(scenario: "failure-and-retry")
+        app.launch()
+
+        let retry = app.buttons["AgentActivityEventRetry"]
+        XCTAssertTrue(retry.waitForExistence(timeout: 10))
+        retry.tap()
+
+        let succeeded = app.buttons.matching(
+            NSPredicate(format: "label == %@", "Publish package")
+        ).firstMatch
+        XCTAssertTrue(succeeded.waitForExistence(timeout: 5))
     }
 
     func testTestLabAndRichComposerControlsAreDiscoverable() {
