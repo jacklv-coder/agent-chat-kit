@@ -30,6 +30,7 @@ public final class AgentConversationViewController: UIViewController {
     private var isHistoryRequestArmed = false
     private var isPerformingCollectionUpdate = false
     private var pendingCollectionUpdate: AgentScheduledUpdate?
+    private var pendingCellReconfigurationBlockIDs: Set<AgentBlockID> = []
     private var pendingHeightChangeBlockIDs: Set<AgentBlockID> = []
     private var needsInitialScrollToLatest = true
     private var bannerHeightConstraint: NSLayoutConstraint?
@@ -316,10 +317,9 @@ public final class AgentConversationViewController: UIViewController {
             self?.updateJumpButton(unreadCount: count)
         }
 
-        updateScheduler = AgentUpdateScheduler(
-            classify: { [weak self] patch in self?.classify(patch) ?? .structural },
-            flush: { [weak self] update in self?.apply(update) }
-        )
+        updateScheduler = AgentUpdateScheduler { [weak self] update in
+            self?.apply(update)
+        }
     }
 
     private func observeStore() {
@@ -339,21 +339,6 @@ public final class AgentConversationViewController: UIViewController {
                 guard !Task.isCancelled else { return }
                 self.handleComposer(action)
             }
-        }
-    }
-
-    private func classify(_ patch: AgentPresentationPatch) -> AgentCollectionUpdateKind {
-        switch patch {
-        case .replaceAll, .insertTurn, .deleteTurn, .insertBlock, .deleteBlock, .prependTurns:
-            return .structural
-        case .reconfigureBlock(let blockID):
-            guard let block = turnAndBlock(for: blockID)?.block else { return .structural }
-            switch block.content {
-            case .activity: return .contentOnly
-            default: return .sizeAffecting
-            }
-        case .reconfigureTurn, .historyStateChanged, .conversationStateChanged, .notice:
-            return .contentOnly
         }
     }
 
@@ -407,26 +392,23 @@ public final class AgentConversationViewController: UIViewController {
 
         displayedTurns = presentationTurns
         let existing = Set(displayedTurns.flatMap { $0.blocks.map(\.id) })
-        let sizeIDs = update.sizeAffectingBlockIDs.filter(existing.contains)
-        let contentIDs = update.contentOnlyBlockIDs.filter(existing.contains)
-        let updatedIndexPaths = sizeIDs.union(contentIDs).compactMap(indexPath(for:))
+        let updatedIndexPaths = update.reconfiguredBlockIDs
+            .filter(existing.contains)
+            .compactMap(indexPath(for:))
         let turnIDs = update.patches.compactMap { patch -> AgentTurnID? in
             if case .reconfigureTurn(let turnID) = patch { return turnID }
             return nil
         }
         reconfigureVisibleTurnHeaders(ids: Set(turnIDs))
 
-        guard !updatedIndexPaths.isEmpty else {
-            finishCollectionUpdate(anchor: nil, followLatest: false)
-            return
-        }
+        guard !updatedIndexPaths.isEmpty else { return }
 
         isPerformingCollectionUpdate = true
         let shouldFollow = scrollCoordinator.shouldAutomaticallyFollowLatest
         UIView.performWithoutAnimation {
             collectionView.reconfigureItems(at: updatedIndexPaths)
             collectionView.performBatchUpdates(nil) { [weak self] _ in
-                self?.finishCollectionUpdate(anchor: nil, followLatest: shouldFollow)
+                self?.finishCollectionUpdate(shouldFollow ? .followLatest : .none)
             }
         }
     }
@@ -437,6 +419,7 @@ public final class AgentConversationViewController: UIViewController {
         followLatest: Bool,
         forceReload: Bool
     ) {
+        isPerformingCollectionUpdate = true
         synchronizeDefaultExpansionState()
         let previousTurns = displayedTurns
         guard !forceReload,
@@ -447,18 +430,17 @@ public final class AgentConversationViewController: UIViewController {
                 collectionView.reloadData()
                 collectionView.layoutIfNeeded()
             }
-            finishCollectionUpdate(anchor: anchor, followLatest: followLatest)
+            finishCollectionUpdate(completionIntent(anchor: anchor, followLatest: followLatest))
             return
         }
 
         guard changes.hasChanges else {
             displayedTurns = updatedTurns
             reconfigureVisibleItems()
-            finishCollectionUpdate(anchor: anchor, followLatest: followLatest)
+            finishCollectionUpdate(completionIntent(anchor: anchor, followLatest: followLatest))
             return
         }
 
-        isPerformingCollectionUpdate = true
         displayedTurns = updatedTurns
         UIView.performWithoutAnimation {
             collectionView.performBatchUpdates {
@@ -469,7 +451,9 @@ public final class AgentConversationViewController: UIViewController {
             } completion: { [weak self] _ in
                 guard let self else { return }
                 self.reconfigureVisibleItems()
-                self.finishCollectionUpdate(anchor: anchor, followLatest: followLatest)
+                self.finishCollectionUpdate(
+                    self.completionIntent(anchor: anchor, followLatest: followLatest)
+                )
             }
         }
     }
@@ -478,41 +462,80 @@ public final class AgentConversationViewController: UIViewController {
         var pending = pendingCollectionUpdate ?? AgentScheduledUpdate()
         pending.requiresStructuralReconciliation =
             pending.requiresStructuralReconciliation || update.requiresStructuralReconciliation
-        pending.sizeAffectingBlockIDs.formUnion(update.sizeAffectingBlockIDs)
-        pending.contentOnlyBlockIDs.formUnion(update.contentOnlyBlockIDs)
-        pending.includesCriticalState = pending.includesCriticalState || update.includesCriticalState
+        pending.reconfiguredBlockIDs.formUnion(update.reconfiguredBlockIDs)
         pending.patches.append(contentsOf: update.patches)
         pendingCollectionUpdate = pending
     }
 
-    private func finishCollectionUpdate(
+    private func completionIntent(
         anchor: AgentLayoutAnchor?,
         followLatest: Bool
-    ) {
-        collectionView.layoutIfNeeded()
+    ) -> AgentCollectionCompletionIntent {
         if let anchor {
+            return .restoreHistory(anchor)
+        }
+        return followLatest ? .followLatest : .none
+    }
+
+    private func finishCollectionUpdate(_ intent: AgentCollectionCompletionIntent) {
+        switch intent {
+        case .none:
+            collectionView.layoutIfNeeded()
+            completeCollectionUpdate()
+
+        case .restoreHistory(let anchor):
+            collectionView.layoutIfNeeded()
             scrollCoordinator.restore(anchor)
-        } else if followLatest {
-            scrollCoordinator.scrollToLatest()
+            completeCollectionUpdate()
+
+        case .followLatest:
+            collectionView.layoutIfNeeded()
+            if scrollCoordinator.shouldAutomaticallyFollowLatest {
+                scrollCoordinator.scrollToLatest()
+            }
+            // Keep the transaction closed until UICollectionView has materialized the target
+            // cell. Parsed content can then enqueue its own height transaction without overlap.
             DispatchQueue.main.async { [weak self] in
-                guard let self, self.scrollCoordinator.shouldAutomaticallyFollowLatest else {
-                    return
-                }
+                guard let self else { return }
                 self.collectionView.layoutIfNeeded()
-                self.scrollCoordinator.scrollToLatest()
+                if self.scrollCoordinator.shouldAutomaticallyFollowLatest {
+                    self.scrollCoordinator.scrollToLatest()
+                }
+                self.completeCollectionUpdate()
+            }
+
+        case .preserveBlock(let blockID, let viewportOffset):
+            // Compositional-layout self-sizing settles on the following layout turn. Keep the
+            // transaction closed until the single viewport adjustment has been applied.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.collectionView.layoutIfNeeded()
+                self.restoreViewportPosition(of: blockID, offset: viewportOffset)
+                self.completeCollectionUpdate()
             }
         }
+    }
+
+    private func completeCollectionUpdate() {
         isPerformingCollectionUpdate = false
 
-        let heightChangeIDs = pendingHeightChangeBlockIDs
-        pendingHeightChangeBlockIDs.removeAll()
-        for blockID in heightChangeIDs {
-            handleCellHeightChange(blockID)
-        }
-
-        if let pending = pendingCollectionUpdate {
-            pendingCollectionUpdate = nil
-            apply(pending)
+        while !isPerformingCollectionUpdate {
+            if let pending = pendingCollectionUpdate {
+                pendingCollectionUpdate = nil
+                apply(pending)
+                return
+            }
+            if let blockID = pendingCellReconfigurationBlockIDs.first {
+                pendingCellReconfigurationBlockIDs.remove(blockID)
+                reconfigure(blockID)
+                continue
+            }
+            if let blockID = pendingHeightChangeBlockIDs.first {
+                pendingHeightChangeBlockIDs.remove(blockID)
+                handleCellHeightChange(blockID)
+                continue
+            }
+            return
         }
     }
 
@@ -873,7 +896,7 @@ public final class AgentConversationViewController: UIViewController {
         let shouldFollow = scrollCoordinator.shouldAutomaticallyFollowLatest
         UIView.performWithoutAnimation {
             collectionView.performBatchUpdates(nil) { [weak self] _ in
-                self?.finishCollectionUpdate(anchor: nil, followLatest: shouldFollow)
+                self?.finishCollectionUpdate(shouldFollow ? .followLatest : .none)
             }
         }
     }
@@ -891,6 +914,10 @@ public final class AgentConversationViewController: UIViewController {
     }
 
     private func reconfigure(_ blockID: AgentBlockID) {
+        guard !isPerformingCollectionUpdate else {
+            pendingCellReconfigurationBlockIDs.insert(blockID)
+            return
+        }
         guard let indexPath = indexPath(for: blockID),
             let attributes = collectionView.layoutAttributesForItem(at: indexPath)
         else { return }
@@ -899,11 +926,9 @@ public final class AgentConversationViewController: UIViewController {
         UIView.performWithoutAnimation {
             collectionView.reconfigureItems(at: [indexPath])
             collectionView.performBatchUpdates(nil) { [weak self] _ in
-                guard let self else { return }
-                self.finishCollectionUpdate(anchor: nil, followLatest: false)
-                DispatchQueue.main.async { [weak self] in
-                    self?.restoreViewportPosition(of: blockID, offset: viewportOffset)
-                }
+                self?.finishCollectionUpdate(
+                    .preserveBlock(blockID, viewportOffset: viewportOffset)
+                )
             }
         }
     }
@@ -1073,6 +1098,13 @@ extension AgentConversationViewController: UICollectionViewDataSource, UICollect
         finishScrollInteraction()
     }
 
+}
+
+private enum AgentCollectionCompletionIntent {
+    case none
+    case followLatest
+    case restoreHistory(AgentLayoutAnchor)
+    case preserveBlock(AgentBlockID, viewportOffset: CGFloat)
 }
 
 private struct AgentCollectionBatchChanges {

@@ -481,9 +481,7 @@ final class AgentTimelineTests: XCTestCase {
                 patches: [.insertTurn(markdownTurn.id, index: initialTurns.count)]
             )
         )
-        let applied = expectation(description: "coalesced structural update")
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { applied.fulfill() }
-        await fulfillment(of: [applied], timeout: 1)
+        try await Task.sleep(for: .milliseconds(200))
         controller.view.layoutIfNeeded()
         collectionView.layoutIfNeeded()
         for cell in collectionView.visibleCells.compactMap({ $0 as? AgentBlockCell }) {
@@ -595,6 +593,188 @@ final class AgentTimelineTests: XCTestCase {
         let collapsedCell = try XCTUnwrap(collectionView.cellForItem(at: path) as? AgentBlockCell)
         XCTAssertEqual(collapsedCell.frame.height, collapsedHeight, accuracy: 1)
         XCTAssertNil(collectionView.layer.animationKeys())
+    }
+
+    func testControllerSerializesExpansionWithStructuralInsertion() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        var output = AgentTextBuffer()
+        output.append((0..<6).map { "queued output \($0)" }.joined(separator: "\n"))
+        let command = AgentBlock(
+            id: "serialized-command",
+            kind: .command,
+            content: .command(.init(command: "swift test", output: output, exitCode: 0)),
+            state: .succeeded,
+            createdAt: date
+        )
+        let initialTurn = AgentTurn(
+            id: "serialized-turn",
+            role: .assistant,
+            blocks: [command],
+            state: .completed,
+            createdAt: date
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(id: "serialized-expansion", turns: [initialTurn])
+        )
+        let controller = AgentConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let collectionView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UICollectionView }.first
+        )
+        collectionView.layoutIfNeeded()
+        let commandPath = IndexPath(item: 0, section: 0)
+        let cell = try XCTUnwrap(collectionView.cellForItem(at: commandPath) as? AgentBlockCell)
+        let collapsedHeight = cell.frame.height
+        let header = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventHeader"
+            } as? UIControl
+        )
+
+        header.sendActions(for: .touchUpInside)
+        header.sendActions(for: .touchUpInside)
+
+        let insertedBlock = AgentBlock(
+            id: "serialized-result",
+            kind: .activity,
+            content: .activity(.init(title: "Inserted while disclosure was updating")),
+            state: .succeeded,
+            createdAt: date
+        )
+        let insertedTurn = AgentTurn(
+            id: "serialized-inserted-turn",
+            role: .assistant,
+            blocks: [insertedBlock],
+            state: .completed,
+            createdAt: date
+        )
+        var updatedSnapshot = store.snapshot
+        updatedSnapshot.turns.append(insertedTurn)
+        store.apply(
+            .init(
+                snapshot: updatedSnapshot,
+                patches: [.insertTurn(insertedTurn.id, index: 1)]
+            )
+        )
+
+        try await Task.sleep(for: .milliseconds(250))
+        controller.view.layoutIfNeeded()
+        collectionView.layoutIfNeeded()
+
+        XCTAssertEqual(collectionView.numberOfSections, 2)
+        XCTAssertNotNil(collectionView.cellForItem(at: .init(item: 0, section: 1)))
+        let finalCell = try XCTUnwrap(
+            collectionView.cellForItem(at: commandPath) as? AgentBlockCell
+        )
+        let details = try XCTUnwrap(
+            finalCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventDetails"
+            }
+        )
+        XCTAssertTrue(details.isHidden)
+        XCTAssertEqual(finalCell.frame.height, collapsedHeight, accuracy: 1)
+        XCTAssertNil(collectionView.layer.animationKeys())
+    }
+
+    func testControllerPreservesVisibleBlockWhenHistorySectionsArePrepended() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        func turn(prefix: String, index: Int) -> AgentTurn {
+            AgentTurn(
+                id: .init(rawValue: "\(prefix)-turn-\(index)"),
+                role: .assistant,
+                blocks: [
+                    AgentBlock(
+                        id: .init(rawValue: "\(prefix)-block-\(index)"),
+                        kind: .activity,
+                        content: .activity(.init(title: "\(prefix) message \(index)")),
+                        state: .succeeded,
+                        createdAt: date
+                    )
+                ],
+                state: .completed,
+                createdAt: date
+            )
+        }
+
+        let initialTurns = (0..<24).map { turn(prefix: "current", index: $0) }
+        let store = AgentConversationStore(
+            snapshot: .init(
+                id: "controller-history-anchor",
+                turns: initialTurns,
+                earlierHistoryCursor: "older",
+                hasEarlierHistory: true
+            )
+        )
+        let controller = AgentConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let collectionView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UICollectionView }.first
+        )
+        collectionView.layoutIfNeeded()
+        collectionView.scrollToItem(
+            at: IndexPath(item: 0, section: 9),
+            at: .top,
+            animated: false
+        )
+        collectionView.layoutIfNeeded()
+
+        let firstVisiblePath = try XCTUnwrap(
+            collectionView.indexPathsForVisibleItems.min { lhs, rhs in
+                let leftY = collectionView.layoutAttributesForItem(at: lhs)?.frame.minY ?? 0
+                let rightY = collectionView.layoutAttributesForItem(at: rhs)?.frame.minY ?? 0
+                return leftY < rightY
+            }
+        )
+        let anchoredBlockID = initialTurns[firstVisiblePath.section].blocks[firstVisiblePath.item].id
+        let originalAttributes = try XCTUnwrap(
+            collectionView.layoutAttributesForItem(at: firstVisiblePath)
+        )
+        let originalViewportOffset =
+            originalAttributes.frame.minY
+            - collectionView.contentOffset.y
+            - collectionView.adjustedContentInset.top
+
+        let olderTurns = (0..<5).map { turn(prefix: "older", index: $0) }
+        var updatedSnapshot = store.snapshot
+        updatedSnapshot.turns.insert(contentsOf: olderTurns, at: 0)
+        updatedSnapshot.hasEarlierHistory = false
+        updatedSnapshot.earlierHistoryCursor = nil
+        store.apply(
+            .init(
+                snapshot: updatedSnapshot,
+                patches: [
+                    .prependTurns(olderTurns.map(\.id)),
+                    .historyStateChanged,
+                ]
+            )
+        )
+
+        try await Task.sleep(for: .milliseconds(200))
+        controller.view.layoutIfNeeded()
+        collectionView.layoutIfNeeded()
+
+        let anchoredSection = try XCTUnwrap(
+            updatedSnapshot.turns.firstIndex { turn in
+                turn.blocks.contains { $0.id == anchoredBlockID }
+            }
+        )
+        let restoredPath = IndexPath(item: 0, section: anchoredSection)
+        let restoredAttributes = try XCTUnwrap(
+            collectionView.layoutAttributesForItem(at: restoredPath)
+        )
+        let restoredViewportOffset =
+            restoredAttributes.frame.minY
+            - collectionView.contentOffset.y
+            - collectionView.adjustedContentInset.top
+
+        XCTAssertEqual(collectionView.numberOfSections, initialTurns.count + olderTurns.count)
+        XCTAssertEqual(restoredViewportOffset, originalViewportOffset, accuracy: 1)
     }
 
     func testControllerDefensivelyFiltersDuplicateStableIdentifiers() {
@@ -958,7 +1138,6 @@ final class AgentTimelineTests: XCTestCase {
         var received: AgentScheduledUpdate?
         let scheduler = AgentUpdateScheduler(
             coalescingMilliseconds: 33,
-            classify: { _ in .sizeAffecting },
             flush: {
                 received = $0
                 expectation.fulfill()
@@ -967,7 +1146,7 @@ final class AgentTimelineTests: XCTestCase {
         scheduler.enqueue(.reconfigureBlock("block"))
         scheduler.enqueue(.reconfigureBlock("block"))
         await fulfillment(of: [expectation], timeout: 1)
-        XCTAssertEqual(received?.sizeAffectingBlockIDs, ["block"])
+        XCTAssertEqual(received?.reconfiguredBlockIDs, ["block"])
         XCTAssertEqual(received?.patches.count, 2)
     }
 

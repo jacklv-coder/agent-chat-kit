@@ -69,4 +69,5 @@ verify that the same reconciliation becomes a no-op as soon as direct manipulati
 
 For disclosure regressions, assert that a visible tool row reconfigures without layer animations, keeps
 the tapped header at the same viewport position, updates accessibility state, and resolves the expanded
-or collapsed self-sizing height in one completed layout pass.
+or collapsed self-sizing height within one serialized transaction. Also enqueue a structural insertion
+during rapid disclosure changes to verify that collection batches never overlap.

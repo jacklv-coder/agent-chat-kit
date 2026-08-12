@@ -48,12 +48,15 @@ Tapping it establishes follow intent and updates the content offset immediately.
 
 The timeline uses a traditional `UICollectionViewDataSource`. Insertions and deletions update the
 backing turns first, then commit explicit, non-animated `performBatchUpdates`; content-only changes
-reconfigure only their affected items. Parsed Markdown height changes request one self-sizing batch,
-and only readers already following the latest message are returned to the bottom.
+reconfigure only their affected items. Model changes, disclosure requests, and parsed Markdown height
+changes share one serialized collection transaction. Only readers already following the latest
+message are returned to the bottom; the transaction remains closed through UICollectionView's next
+self-sizing layout turn so the final target cell is materialized before queued work begins.
 
 Compact tool and activity rows use the same direct update path: change `expandedBlockIDs`, reconfigure
-that item without animation, resolve self-sizing once, and keep that cell's top at the same viewport
-position. The detail stack simply participates in layout when expanded and is hidden when collapsed.
+that item without animation, and keep that cell's top at the same viewport position. Rapid disclosure
+requests coalesce while a model or height transaction is active. The detail stack simply participates
+in layout when expanded and is hidden when collapsed.
 
 Do not reach into the collection view to manage offsets from the host. The controller preserves a
 stable block identifier and viewport-relative offset when older turns are prepended, and falls back to
