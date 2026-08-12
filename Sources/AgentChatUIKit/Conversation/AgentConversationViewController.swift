@@ -580,7 +580,16 @@ public final class AgentConversationViewController: UIViewController {
         case .restoreHistory(let anchor):
             collectionView.layoutIfNeeded()
             scrollCoordinator.restore(anchor)
-            completeCollectionUpdate()
+            // On older UIKit versions, self-sizing cells inserted above the viewport can
+            // resolve their final heights one layout turn after the batch completion.
+            // Restore the same stable-ID anchor once more after that pass so the visible
+            // message does not move when estimated heights are replaced.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.collectionView.layoutIfNeeded()
+                self.scrollCoordinator.restore(anchor)
+                self.completeCollectionUpdate()
+            }
 
         case .followLatest:
             collectionView.layoutIfNeeded()
