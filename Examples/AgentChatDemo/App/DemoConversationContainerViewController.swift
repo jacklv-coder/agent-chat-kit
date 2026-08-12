@@ -361,27 +361,37 @@ final class DemoConversationContainerViewController: UIViewController {
             timelineImplementation == .collectionView
             ? .tableView
             : .collectionView
-        navigationController?.pushViewController(
-            DemoConversationContainerViewController(
-                scenario: scenario,
-                timelineImplementation: implementation,
-                toolPresentationStyle: toolPresentationStyle
-            ),
-            animated: true
-        )
+        Task { @MainActor [weak self] in
+            guard let self, let navigationController else { return }
+            let state = await playbackController.state()
+            navigationController.pushViewController(
+                DemoConversationContainerViewController(
+                    scenario: scenario,
+                    playbackController: .init(isPaused: state.isPaused, rate: state.rate),
+                    timelineImplementation: implementation,
+                    toolPresentationStyle: toolPresentationStyle
+                ),
+                animated: true
+            )
+        }
     }
 
     private func openToolPresentation(_ style: AgentToolPresentationStyle) {
         guard style != toolPresentationStyle else { return }
-        let replacement = DemoConversationContainerViewController(
-            scenario: scenario,
-            timelineImplementation: timelineImplementation,
-            toolPresentationStyle: style
-        )
-        guard var controllers = navigationController?.viewControllers, !controllers.isEmpty
-        else { return }
-        controllers[controllers.count - 1] = replacement
-        navigationController?.setViewControllers(controllers, animated: false)
+        Task { @MainActor [weak self] in
+            guard let self, let navigationController else { return }
+            let state = await playbackController.state()
+            let replacement = DemoConversationContainerViewController(
+                scenario: scenario,
+                playbackController: .init(isPaused: state.isPaused, rate: state.rate),
+                timelineImplementation: timelineImplementation,
+                toolPresentationStyle: style
+            )
+            var controllers = navigationController.viewControllers
+            guard !controllers.isEmpty else { return }
+            controllers[controllers.count - 1] = replacement
+            navigationController.setViewControllers(controllers, animated: false)
+        }
     }
 
     private func rateAction(title: String, rate: Double, selectedRate: Double) -> UIAction {

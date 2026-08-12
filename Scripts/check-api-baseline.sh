@@ -41,17 +41,15 @@ dump_api() {
       -module AgentChatTesting \
       -module AgentChatKit \
       -I "$products" \
+      -I "$checkouts/swift-markdown/Sources/CAtomic/include" \
+      -I "$checkouts/swift-cmark/src/include" \
+      -I "$checkouts/swift-cmark/extensions/include" \
       -sdk "$sdk" \
       -target arm64-apple-ios17.0-simulator \
       -swift-only \
+      -abort-on-module-fail \
       -avoid-location \
       -avoid-tool-args \
-      -Xcc "-fmodule-map-file=$checkouts/swift-markdown/Sources/CAtomic/include/module.modulemap" \
-      -Xcc "-fmodule-map-file=$checkouts/swift-cmark/src/include/module.modulemap" \
-      -Xcc "-fmodule-map-file=$checkouts/swift-cmark/extensions/include/module.modulemap" \
-      -Xcc "-I$checkouts/swift-markdown/Sources/CAtomic/include" \
-      -Xcc "-I$checkouts/swift-cmark/src/include" \
-      -Xcc "-I$checkouts/swift-cmark/extensions/include" \
       -o "$output_path"
   )
 }

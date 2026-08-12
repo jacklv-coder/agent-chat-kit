@@ -49,6 +49,15 @@ jobs:
           -destination "$DESTINATION"
           -only-testing:${{ matrix.suite }}
           -skipPackagePluginValidation test
+      - name: Collect snapshot diagnostics
+        if: failure() && matrix.suite == 'AgentChatSnapshotTests'
+        run: |
+          mkdir -p .snapshot-diagnostics/reference .snapshot-diagnostics/actual
+          cp Tests/AgentChatSnapshotTests/__Snapshots__/AgentChatSnapshotTests/*.png \
+            .snapshot-diagnostics/reference/
+          find /Users/runner/Library/Developer/CoreSimulator/Devices \
+            -path '*/data/tmp/AgentChatSnapshotTests/*.png' \
+            -exec cp {} .snapshot-diagnostics/actual/ \;
       - name: Upload snapshot diagnostics
         if: failure() && matrix.suite == 'AgentChatSnapshotTests'
         uses: actions/upload-artifact@v4
@@ -56,8 +65,8 @@ jobs:
           name: snapshot-diagnostics-${{ github.run_attempt }}
           if-no-files-found: ignore
           path: |
-            Tests/AgentChatSnapshotTests/__Snapshots__/**/*.png
-            /Users/runner/Library/Developer/CoreSimulator/Devices/*/data/tmp/AgentChatSnapshotTests/*.png
+            .snapshot-diagnostics/reference/*.png
+            .snapshot-diagnostics/actual/*.png
 
   thread-sanitizer:
     runs-on: macos-15
@@ -77,10 +86,13 @@ jobs:
   demo-build:
     runs-on: macos-15
     strategy:
+      fail-fast: false
       matrix:
-        destination:
-          - generic/platform=iOS Simulator
-          - platform=iOS Simulator,name=iPad Pro 13-inch (M4),OS=latest
+        include:
+          - device_family: universal
+            targeted_device_family: 1,2
+          - device_family: iPad
+            targeted_device_family: 2
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
@@ -90,7 +102,8 @@ jobs:
           xcodebuild
           -project Examples/AgentChatDemo/AgentChatDemo.xcodeproj
           -scheme AgentChatDemo
-          -destination '${{ matrix.destination }}'
+          -destination 'generic/platform=iOS Simulator'
+          TARGETED_DEVICE_FAMILY='${{ matrix.targeted_device_family }}'
           -skipPackagePluginValidation build
 
   quickstart-build:
