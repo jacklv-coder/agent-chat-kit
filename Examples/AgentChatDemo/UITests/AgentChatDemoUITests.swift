@@ -17,6 +17,12 @@ final class AgentChatDemoUITests: XCTestCase {
         return app
     }
 
+    private func contentElement(containing text: String, in app: XCUIApplication) -> XCUIElement {
+        app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS %@", text))
+            .firstMatch
+    }
+
     func testDefaultLaunchOpensCompleteConversationExperience() {
         continueAfterFailure = false
         let app = makeDefaultApp()
@@ -66,7 +72,7 @@ final class AgentChatDemoUITests: XCTestCase {
 
         let thinking = app.buttons.matching(
             NSPredicate(
-                format: "identifier == %@ AND label == %@",
+                format: "identifier == %@ AND label BEGINSWITH %@",
                 "AgentActivityEventHeader",
                 "Thinking"
             )
@@ -125,7 +131,7 @@ final class AgentChatDemoUITests: XCTestCase {
         editor.typeText("Animate a response at the bottom")
         app.buttons["AgentComposerSendButton"].tap()
 
-        let response = app.staticTexts["Demo 实时响应"]
+        let response = contentElement(containing: "Demo 实时响应", in: app)
         XCTAssertTrue(response.waitForExistence(timeout: 15))
     }
 
@@ -168,7 +174,7 @@ final class AgentChatDemoUITests: XCTestCase {
         retry.tap()
 
         let succeeded = app.buttons.matching(
-            NSPredicate(format: "label == %@", "Publish package")
+            NSPredicate(format: "label BEGINSWITH %@", "Publish package")
         ).firstMatch
         XCTAssertTrue(succeeded.waitForExistence(timeout: 5))
     }
@@ -197,7 +203,9 @@ final class AgentChatDemoUITests: XCTestCase {
         continueAfterFailure = false
         let app = makeApp(scenario: "complete-conversation")
         app.launch()
-        XCTAssertTrue(app.staticTexts["完整会话体验"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            contentElement(containing: "完整会话体验", in: app).waitForExistence(timeout: 10)
+        )
 
         let lab = app.buttons["AgentChatDemoTestLab"]
         XCTAssertTrue(lab.waitForExistence(timeout: 10))
@@ -255,7 +263,9 @@ final class AgentChatDemoUITests: XCTestCase {
         continueAfterFailure = false
         let app = makeApp(scenario: "complete-conversation")
         app.launch()
-        XCTAssertTrue(app.staticTexts["完整会话体验"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            contentElement(containing: "完整会话体验", in: app).waitForExistence(timeout: 10)
+        )
 
         let lab = app.buttons["AgentChatDemoTestLab"]
         lab.tap()
@@ -273,7 +283,9 @@ final class AgentChatDemoUITests: XCTestCase {
         let step = app.buttons["Step"]
         XCTAssertTrue(step.isEnabled)
         step.tap()
-        XCTAssertTrue(app.staticTexts["完整会话体验"].waitForExistence(timeout: 10))
+        XCTAssertTrue(
+            contentElement(containing: "完整会话体验", in: app).waitForExistence(timeout: 10)
+        )
     }
 
     func testManualReadingShowsUnreadControlAndCanReturnToLatest() {

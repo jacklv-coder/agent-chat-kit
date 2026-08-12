@@ -71,10 +71,12 @@ reduces structured events, renders state, and routes user actions.
 swift package resolve
 xcodebuild -scheme AgentChatKit-Package \
   -destination 'platform=iOS Simulator,name=iPhone 16' test
+Scripts/check-api-baseline.sh
 ```
 
-The UIKit timeline uses a native single-column compositional layout, a traditional
-`UICollectionViewDataSource`, explicit non-animated batch updates, and stable-ID history anchoring.
+The recommended UIKit page uses `AgentTableConversationViewController`: a traditional
+`UITableViewDataSource`, explicit batch updates, self-sizing rows, and stable-ID history anchoring.
+`AgentConversationViewController` remains available when a host needs a custom collection layout.
 The demo project is generated from
 `Examples/AgentChatDemo/project.yml` with `xcodegen generate`.
 
@@ -93,11 +95,15 @@ and a deterministic streamed response. The Test Lab remains available from the n
 contains all normative scenarios, including a complete cell showcase and a current-conversation
 replay for checking realistic Chinese Markdown, tables, trees, long-message layout, and sanitized
 tool activity for commands, image inspection, file edits, skills, and host integrations. Tool
-activity uses compact icon-and-summary rows with
-whole-row expandable details and immediate self-sizing height updates. Expanded image activity resolves a
-thumbnail through the injected `AgentImageProviding`; tapping it opens the Demo's full-screen
-pan-and-zoom preview. Markdown tables use a native, accessible grid with horizontal scrolling when
-needed. The timeline follows streaming output only while the reader owns the latest position,
+activity uses compact icon-and-summary rows with whole-row expandable details and immediate
+self-sizing height updates. Expanded image activity resolves a thumbnail through the injected
+`AgentImageProviding`; tapping it opens the Demo's full-screen pan-and-zoom preview. Markdown tables
+use a native, accessible grid with horizontal scrolling when needed; fenced code scrolls
+horizontally, supports full-source copy and a labeled, bounded in-list preview, and raw unified diffs
+parse off the main actor.
+Rows expose copy/open/retry/approval context menus, pointer feedback, and host-routed full-output
+actions. The composer accepts host-routed file, image, URL, and text drops. The timeline follows
+streaming output only while the reader owns the latest position,
 preserves a stable visible anchor when older history is prepended, and exposes Jump to Latest after
 manual reading. Submitting composer text produces an offline sequence of thinking, file search,
 command, file-read, and streaming Markdown events. The Demo never performs model, network, shell,

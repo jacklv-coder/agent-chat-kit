@@ -46,6 +46,18 @@ enum AgentStrings {
     static var assistant: String { String(localized: "Assistant", bundle: .module) }
     static var system: String { String(localized: "System", bundle: .module) }
     static var copyRawPayload: String { String(localized: "Copy raw payload", bundle: .module) }
+    static var copy: String { String(localized: "Copy", bundle: .module) }
+    static var showMore: String { String(localized: "Show more", bundle: .module) }
+    static var showLess: String { String(localized: "Show less", bundle: .module) }
+    static var code: String { String(localized: "Code", bundle: .module) }
+    static var codeTruncated: String { String(localized: "Code truncated", bundle: .module) }
+    static var copyCommand: String { String(localized: "Copy command", bundle: .module) }
+    static var copyOutput: String { String(localized: "Copy output", bundle: .module) }
+    static var copyRaw: String { String(localized: "Copy raw", bundle: .module) }
+    static var openFullOutput: String {
+        String(localized: "Open full output", bundle: .module)
+    }
+    static var openFullDiff: String { String(localized: "Open full diff", bundle: .module) }
     static var collapse: String { String(localized: "Collapse", bundle: .module) }
     static var created: String { String(localized: "Created", bundle: .module) }
     static var deleted: String { String(localized: "Deleted", bundle: .module) }

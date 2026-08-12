@@ -127,7 +127,7 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
     public var view: UIView { self }
     /// The stream of send, stop, attachment, and accessory actions.
     public let actionStream: AsyncStream<AgentComposerAction>
-    /// Called when the user pastes non-text item providers into the default text editor.
+    /// Called when the user pastes or drops item providers into the default composer.
     public var importHandler: (([NSItemProvider], UIView) -> Void)?
 
     private let continuation: AsyncStream<AgentComposerAction>.Continuation
@@ -211,6 +211,13 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
 
     func submitCurrentInput() { sendOrStop() }
 
+    @discardableResult
+    func handleDroppedItemProviders(_ providers: [NSItemProvider]) -> Bool {
+        guard !providers.isEmpty, let importHandler else { return false }
+        importHandler(providers, self)
+        return true
+    }
+
     private func configureView() {
         backgroundColor = .secondarySystemBackground
         layer.cornerRadius = 22
@@ -219,6 +226,7 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
         layer.borderColor = UIColor.separator.withAlphaComponent(0.5).cgColor
         directionalLayoutMargins = .init(top: 10, leading: 12, bottom: 8, trailing: 10)
         accessibilityIdentifier = "AgentComposer"
+        addInteraction(UIDropInteraction(delegate: self))
 
         rootStack.axis = .vertical
         rootStack.spacing = 6
@@ -275,13 +283,15 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
         placeholderLabel.font = .preferredFont(forTextStyle: .body)
         placeholderLabel.adjustsFontForContentSizeCategory = true
         placeholderLabel.textColor = .placeholderText
+        placeholderLabel.textAlignment = .natural
         placeholderLabel.isUserInteractionEnabled = false
         placeholderLabel.translatesAutoresizingMaskIntoConstraints = false
         textView.addSubview(placeholderLabel)
         textHeightConstraint = textView.heightAnchor.constraint(equalToConstant: 44)
         textHeightConstraint?.isActive = true
         NSLayoutConstraint.activate([
-            placeholderLabel.leadingAnchor.constraint(equalTo: textView.leadingAnchor),
+            placeholderLabel.leftAnchor.constraint(equalTo: textView.leftAnchor),
+            placeholderLabel.rightAnchor.constraint(equalTo: textView.rightAnchor),
             placeholderLabel.topAnchor.constraint(
                 equalTo: textView.topAnchor,
                 constant: textView.textContainerInset.top
@@ -298,6 +308,7 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
         attachmentConfiguration.image = UIImage(systemName: "plus")
         attachmentConfiguration.cornerStyle = .capsule
         attachmentButton.configuration = attachmentConfiguration
+        attachmentButton.isPointerInteractionEnabled = true
         attachmentButton.accessibilityLabel = AgentStrings.attach
         attachmentButton.accessibilityIdentifier = "AgentComposerAttachmentButton"
         attachmentButton.addAction(
@@ -339,6 +350,7 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
         contextLabel.accessibilityIdentifier = "AgentComposerContext"
 
         sendButton.accessibilityIdentifier = "AgentComposerSendButton"
+        sendButton.isPointerInteractionEnabled = true
         sendButton.addAction(UIAction { [weak self] _ in self?.sendOrStop() }, for: .touchUpInside)
         NSLayoutConstraint.activate([
             sendButton.widthAnchor.constraint(equalToConstant: 44),
@@ -386,6 +398,7 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
             configuration.cornerStyle = .capsule
             if accessory.isSelected { configuration.baseForegroundColor = .systemBlue }
             let button = UIButton(configuration: configuration)
+            button.isPointerInteractionEnabled = true
             button.isEnabled = accessory.isEnabled
             button.accessibilityIdentifier = "AgentComposerAccessory.\(accessory.id)"
             button.addAction(
@@ -460,6 +473,61 @@ extension AgentComposerView: UITextViewDelegate {
         placeholderLabel.isHidden = !textView.text.isEmpty
         configureSendButton()
         updateTextHeight()
+    }
+}
+
+extension AgentComposerView: UIDropInteractionDelegate {
+    public func dropInteraction(
+        _ interaction: UIDropInteraction,
+        canHandle session: any UIDropSession
+    ) -> Bool {
+        importHandler != nil
+            && session.hasItemsConforming(toTypeIdentifiers: Self.supportedDropTypeIdentifiers)
+    }
+
+    public func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidUpdate session: any UIDropSession
+    ) -> UIDropProposal {
+        UIDropProposal(
+            operation: dropInteraction(interaction, canHandle: session) ? .copy : .cancel)
+    }
+
+    public func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidEnter session: any UIDropSession
+    ) {
+        layer.borderColor = UIColor.systemBlue.cgColor
+    }
+
+    public func dropInteraction(
+        _ interaction: UIDropInteraction,
+        sessionDidExit session: any UIDropSession
+    ) {
+        restoreDropBorder()
+    }
+
+    public func dropInteraction(
+        _ interaction: UIDropInteraction,
+        performDrop session: any UIDropSession
+    ) {
+        restoreDropBorder()
+        _ = handleDroppedItemProviders(session.items.map(\.itemProvider))
+    }
+
+    public func dropInteraction(
+        _ interaction: UIDropInteraction,
+        concludeDrop session: any UIDropSession
+    ) {
+        restoreDropBorder()
+    }
+
+    private static var supportedDropTypeIdentifiers: [String] {
+        [UTType.fileURL, .image, .plainText, .url, .data].map(\.identifier)
+    }
+
+    private func restoreDropBorder() {
+        layer.borderColor = UIColor.separator.withAlphaComponent(0.5).cgColor
     }
 }
 

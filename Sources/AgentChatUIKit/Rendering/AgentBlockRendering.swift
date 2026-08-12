@@ -148,6 +148,11 @@ protocol AgentTableBlockLayoutProviding: AnyObject {
     func tableRowHeight(for context: AgentBlockRenderContext) -> CGFloat
 }
 
+@MainActor
+protocol AgentBlockRendererCacheManaging: AnyObject {
+    func removeCachedData()
+}
+
 /// A scene-local registry that falls back safely for unknown and mismatched blocks.
 @MainActor
 public final class AgentBlockRendererRegistry {
@@ -221,5 +226,18 @@ public final class AgentBlockRendererRegistry {
             let identifier = ObjectIdentifier(renderer)
             if registered.insert(identifier).inserted { tableRenderer.register(in: tableView) }
         }
+    }
+
+    func removeCachedData() {
+        var cleared = Set<ObjectIdentifier>()
+        let candidates: [any AgentBlockRenderer] = [fallbackRenderer] + Array(renderers.values)
+        for renderer in candidates {
+            let identifier = ObjectIdentifier(renderer)
+            guard cleared.insert(identifier).inserted,
+                let cacheManaging = renderer as? any AgentBlockRendererCacheManaging
+            else { continue }
+            cacheManaging.removeCachedData()
+        }
+        defaultTableFallbackRenderer.removeCachedData()
     }
 }

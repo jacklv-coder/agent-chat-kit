@@ -2,6 +2,62 @@ import AgentChatCore
 import AgentChatMarkdown
 import UIKit
 
+private let agentDiffWasTruncatedMetadataKey = "agentchat.internal.diff-was-truncated"
+
+private enum AgentMarkdownInlineSegment {
+    case text([AgentMarkdownInline])
+    case image(source: String?, alternativeText: String)
+}
+
+private func agentMarkdownInlineSegments(
+    _ content: [AgentMarkdownInline]
+) -> [AgentMarkdownInlineSegment] {
+    var result: [AgentMarkdownInlineSegment] = []
+
+    func appendText(_ values: [AgentMarkdownInline]) {
+        guard !values.isEmpty else { return }
+        if case .text(let existing) = result.last {
+            result[result.count - 1] = .text(existing + values)
+        } else {
+            result.append(.text(values))
+        }
+    }
+
+    func appendNested(
+        _ nested: [AgentMarkdownInline],
+        transform: ([AgentMarkdownInline]) -> AgentMarkdownInline
+    ) {
+        for segment in agentMarkdownInlineSegments(nested) {
+            switch segment {
+            case .text(let values):
+                appendText([transform(values)])
+            case .image(let source, let alternativeText):
+                result.append(.image(source: source, alternativeText: alternativeText))
+            }
+        }
+    }
+
+    for value in content {
+        switch value {
+        case .image(let source, let alternativeText):
+            result.append(.image(source: source, alternativeText: alternativeText))
+        case .emphasis(let nested):
+            appendNested(nested, transform: AgentMarkdownInline.emphasis)
+        case .strong(let nested):
+            appendNested(nested, transform: AgentMarkdownInline.strong)
+        case .strikethrough(let nested):
+            appendNested(nested, transform: AgentMarkdownInline.strikethrough)
+        case .link(let destination, let title, let nested):
+            appendNested(nested) {
+                .link(destination: destination, title: title, content: $0)
+            }
+        case .text, .code, .softBreak, .hardBreak, .unsupported:
+            appendText([value])
+        }
+    }
+    return result
+}
+
 private struct AgentBlockPresentationIdentity: Hashable {
     let blockID: AgentBlockID
     let revision: Int64
@@ -74,7 +130,9 @@ private final class AgentBlockContentView: UIView {
         context: AgentBlockRenderContext,
         parser: AgentMarkdownParser,
         cache: AgentMarkdownDocumentCache,
-        preparedMarkdownDocument: AgentMarkdownRenderDocument? = nil
+        diffParser: AgentUnifiedDiffParser,
+        preparedMarkdownDocument: AgentMarkdownRenderDocument? = nil,
+        didPrepareMarkdown: ((AgentMarkdownRenderDocument) -> Void)? = nil
     ) {
         let presentation = AgentBlockPresentationIdentity(context: context)
         guard representedPresentation != presentation else { return }
@@ -122,6 +180,7 @@ private final class AgentBlockContentView: UIView {
                     document = parsed
                     await cache.insert(parsed, for: key)
                 }
+                didPrepareMarkdown?(document)
                 guard let self,
                     self.representedBlockID == blockID,
                     self.representedRevision == revision
@@ -131,6 +190,54 @@ private final class AgentBlockContentView: UIView {
                 // table, list, or code block without changing the model revision. Explicitly
                 // invalidate the self-sizing cell so the collection view resolves the final
                 // height in the same layout-follow cycle.
+                self.invalidateIntrinsicContentSize()
+                self.didChangeHeight?()
+            }
+            return
+        }
+
+        if case .diff(let diff) = context.block.content,
+            diff.files.isEmpty,
+            let raw = diff.rawUnifiedDiff,
+            !raw.isEmpty
+        {
+            let blockID = context.block.id
+            let revision = context.block.revision
+            asynchronousTask = Task { [weak self] in
+                let result = await diffParser.parse(
+                    raw,
+                    cacheKey: .init(identifier: blockID.rawValue, revision: revision)
+                )
+                guard !Task.isCancelled, let self,
+                    self.representedBlockID == blockID,
+                    self.representedRevision == revision
+                else { return }
+                var parsedDiff = diff
+                parsedDiff.files = result.files
+                var parsedBlock = context.block
+                parsedBlock.content = .diff(parsedDiff)
+                if result.wasTruncated {
+                    parsedBlock.metadata[agentDiffWasTruncatedMetadataKey] = .bool(true)
+                }
+                let parsedContext = AgentBlockRenderContext(
+                    conversationID: context.conversationID,
+                    turn: context.turn,
+                    block: parsedBlock,
+                    availableWidth: context.availableWidth,
+                    theme: context.theme,
+                    environment: context.environment,
+                    imageProvider: context.imageProvider,
+                    actionSink: context.actionSink
+                )
+                self.removeArrangedSubviews()
+                self.rootStack.addArrangedSubview(
+                    self.makeCard(
+                        context: parsedContext,
+                        preparedMarkdownDocument: nil
+                    )
+                )
+                self.accessibilityLabel = self.accessibilityText(for: parsedBlock)
+                self.accessibilityValue = self.stateText(parsedBlock.state)
                 self.invalidateIntrinsicContentSize()
                 self.didChangeHeight?()
             }
@@ -362,20 +469,45 @@ private final class AgentBlockContentView: UIView {
             }
             addJSON(value.input, title: AgentStrings.input, to: stack, context: context)
             addJSON(value.output, title: AgentStrings.output, to: stack, context: context)
+            stack.addArrangedSubview(
+                actionButton(title: AgentStrings.copyRaw, context: context) {
+                    context.actionSink.send(.copy(context.block.id))
+                }
+            )
 
         case .command(let value):
             stack.addArrangedSubview(detailSectionLabel(AgentStrings.command, context: context))
             stack.addArrangedSubview(codeTextView(value.command, context: context))
+            stack.addArrangedSubview(
+                actionButton(title: AgentStrings.copyCommand, context: context) {
+                    UIPasteboard.general.string = value.command
+                }
+            )
             if let directory = value.workingDirectory {
                 stack.addArrangedSubview(detailLabel(directory, context: context))
             }
             if !value.output.text.isEmpty {
                 stack.addArrangedSubview(detailSectionLabel(AgentStrings.output, context: context))
                 stack.addArrangedSubview(codeTextView(value.output.text, context: context))
+                stack.addArrangedSubview(
+                    actionButton(title: AgentStrings.copyOutput, context: context) {
+                        UIPasteboard.general.string = value.output.text
+                    }
+                )
             }
             if value.output.wasTruncated {
                 stack.addArrangedSubview(
                     detailLabel(AgentStrings.outputTruncated, context: context))
+                stack.addArrangedSubview(
+                    actionButton(title: AgentStrings.openFullOutput, context: context) {
+                        context.actionSink.send(
+                            .custom(
+                                kind: "agentchat.open-full-command-output",
+                                payload: .object(["blockID": .string(context.block.id.rawValue)])
+                            )
+                        )
+                    }
+                )
             }
             var status = stateText(context.block.state)
             if let exitCode = value.exitCode { status += " · exit \(exitCode)" }
@@ -402,6 +534,11 @@ private final class AgentBlockContentView: UIView {
             if let summary = value.summary {
                 stack.addArrangedSubview(detailLabel(summary, context: context))
             }
+            stack.addArrangedSubview(
+                actionButton(title: AgentStrings.open, context: context) {
+                    context.actionSink.send(.openFile(.localIdentifier(value.path)))
+                }
+            )
 
         case .image(let value):
             let width = min(max(context.availableWidth * 0.5, 160), 280)
@@ -642,13 +779,13 @@ private final class AgentBlockContentView: UIView {
             }
 
         case .markdown(let value):
-            stack.addArrangedSubview(
-                AgentMarkdownContentView(
-                    source: value.markdown,
-                    document: preparedMarkdownDocument,
-                    context: context
-                )
+            let view = AgentMarkdownContentView(
+                source: value.markdown,
+                document: preparedMarkdownDocument,
+                context: context
             )
+            view.didChangeHeight = { [weak self] in self?.didChangeHeight?() }
+            stack.addArrangedSubview(view)
 
         case .activity(let value):
             stack.addArrangedSubview(titleLabel(value.title, context: context))
@@ -713,13 +850,48 @@ private final class AgentBlockContentView: UIView {
                 titleLabel(value.title ?? AgentStrings.changes, context: context))
             let additions = value.files.reduce(0) { $0 + $1.additions }
             let deletions = value.files.reduce(0) { $0 + $1.deletions }
+            let summary = "\(value.files.count) files · +\(additions) −\(deletions)"
+            let wasTruncated =
+                context.block.metadata[agentDiffWasTruncatedMetadataKey] == .bool(true)
             stack.addArrangedSubview(
                 detailLabel(
-                    "\(value.files.count) files · +\(additions) −\(deletions)", context: context)
+                    wasTruncated ? "\(summary) · \(AgentStrings.outputTruncated)" : summary,
+                    context: context
+                )
             )
-            if let raw = value.rawUnifiedDiff {
+            let isExpanded = context.environment.expandedBlockIDs.contains(context.block.id)
+            if isExpanded {
+                for file in value.files.prefix(12) {
+                    let path = file.newPath ?? file.oldPath ?? AgentStrings.changes
+                    stack.addArrangedSubview(
+                        detailLabel(
+                            "\(path)  +\(file.additions) −\(file.deletions)",
+                            context: context
+                        )
+                    )
+                }
+            }
+            if isExpanded, let raw = value.rawUnifiedDiff {
                 stack.addArrangedSubview(codeTextView(String(raw.prefix(8_000)), context: context))
             }
+            stack.addArrangedSubview(
+                actionButton(
+                    title: isExpanded ? AgentStrings.collapse : AgentStrings.expand,
+                    context: context
+                ) {
+                    context.actionSink.send(.toggleExpanded(context.block.id))
+                }
+            )
+            stack.addArrangedSubview(
+                actionButton(title: AgentStrings.openFullDiff, context: context) {
+                    context.actionSink.send(
+                        .custom(
+                            kind: "agentchat.open-full-diff",
+                            payload: .object(["blockID": .string(context.block.id.rawValue)])
+                        )
+                    )
+                }
+            )
 
         case .approval(let value):
             stack.addArrangedSubview(titleLabel(value.title, context: context))
@@ -765,6 +937,9 @@ private final class AgentBlockContentView: UIView {
 
         case .artifact(let value):
             stack.addArrangedSubview(titleLabel(value.title, context: context))
+            if let mediaType = value.mediaType {
+                stack.addArrangedSubview(detailLabel(mediaType, context: context))
+            }
             if let summary = value.summary {
                 stack.addArrangedSubview(detailLabel(summary, context: context))
             }
@@ -872,6 +1047,7 @@ private final class AgentBlockContentView: UIView {
         configuration.title = title
         configuration.cornerStyle = .medium
         let button = UIButton(configuration: configuration)
+        button.isPointerInteractionEnabled = true
         button.contentHorizontalAlignment = .leading
         button.addAction(UIAction { _ in action() }, for: .touchUpInside)
         button.accessibilityLabel = title
@@ -940,7 +1116,7 @@ private final class AgentBlockContentView: UIView {
 }
 
 @MainActor
-final class AgentBlockCell: UICollectionViewCell {
+final class AgentBlockCell: UICollectionViewCell, UIPointerInteractionDelegate {
     static let reuseIdentifier = "AgentBlockCell"
 
     private let blockContentView = AgentBlockContentView()
@@ -960,6 +1136,7 @@ final class AgentBlockCell: UICollectionViewCell {
             blockContentView.topAnchor.constraint(equalTo: contentView.topAnchor),
             blockContentView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
+        addInteraction(UIPointerInteraction(delegate: self))
     }
 
     @available(*, unavailable)
@@ -974,13 +1151,17 @@ final class AgentBlockCell: UICollectionViewCell {
         context: AgentBlockRenderContext,
         parser: AgentMarkdownParser,
         cache: AgentMarkdownDocumentCache,
-        preparedMarkdownDocument: AgentMarkdownRenderDocument? = nil
+        diffParser: AgentUnifiedDiffParser,
+        preparedMarkdownDocument: AgentMarkdownRenderDocument? = nil,
+        didPrepareMarkdown: ((AgentMarkdownRenderDocument) -> Void)? = nil
     ) {
         blockContentView.configure(
             context: context,
             parser: parser,
             cache: cache,
-            preparedMarkdownDocument: preparedMarkdownDocument
+            diffParser: diffParser,
+            preparedMarkdownDocument: preparedMarkdownDocument,
+            didPrepareMarkdown: didPrepareMarkdown
         )
         accessibilityLabel = blockContentView.accessibilityLabel
         accessibilityValue = blockContentView.accessibilityValue
@@ -990,10 +1171,17 @@ final class AgentBlockCell: UICollectionViewCell {
     func waitForPendingRendering() async {
         await blockContentView.waitForPendingRendering()
     }
+
+    func pointerInteraction(
+        _ interaction: UIPointerInteraction,
+        styleFor region: UIPointerRegion
+    ) -> UIPointerStyle? {
+        UIPointerStyle(effect: .highlight(UITargetedPreview(view: contentView)), shape: nil)
+    }
 }
 
 @MainActor
-final class AgentTableBlockCell: UITableViewCell {
+final class AgentTableBlockCell: UITableViewCell, UIPointerInteractionDelegate {
     static let reuseIdentifier = "AgentTableBlockCell"
 
     private let blockContentView = AgentBlockContentView()
@@ -1038,6 +1226,7 @@ final class AgentTableBlockCell: UITableViewCell {
             blockContentView.topAnchor.constraint(equalTo: contentView.topAnchor),
             blockContentView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
         ])
+        addInteraction(UIPointerInteraction(delegate: self))
     }
 
     @available(*, unavailable)
@@ -1052,7 +1241,9 @@ final class AgentTableBlockCell: UITableViewCell {
         context: AgentBlockRenderContext,
         parser: AgentMarkdownParser,
         cache: AgentMarkdownDocumentCache,
-        preparedMarkdownDocument: AgentMarkdownRenderDocument? = nil
+        diffParser: AgentUnifiedDiffParser,
+        preparedMarkdownDocument: AgentMarkdownRenderDocument? = nil,
+        didPrepareMarkdown: ((AgentMarkdownRenderDocument) -> Void)? = nil
     ) {
         let sideInset = context.theme.metrics.pageInset
         leadingConstraint.constant = sideInset
@@ -1063,7 +1254,9 @@ final class AgentTableBlockCell: UITableViewCell {
             context: context,
             parser: parser,
             cache: cache,
-            preparedMarkdownDocument: preparedMarkdownDocument
+            diffParser: diffParser,
+            preparedMarkdownDocument: preparedMarkdownDocument,
+            didPrepareMarkdown: didPrepareMarkdown
         )
         accessibilityLabel = nil
         accessibilityValue = nil
@@ -1072,6 +1265,13 @@ final class AgentTableBlockCell: UITableViewCell {
 
     func waitForPendingRendering() async {
         await blockContentView.waitForPendingRendering()
+    }
+
+    func pointerInteraction(
+        _ interaction: UIPointerInteraction,
+        styleFor region: UIPointerRegion
+    ) -> UIPointerStyle? {
+        UIPointerStyle(effect: .highlight(UITargetedPreview(view: contentView)), shape: nil)
     }
 }
 
@@ -1309,6 +1509,12 @@ final class AgentMarkdownContentView: UIView {
     private let accentColor: UIColor
     private let codePointSize: CGFloat
     private let availableWidth: CGFloat
+    private let fontTraits: UITraitCollection
+    private let imageProvider: (any AgentImageProviding)?
+    private let actionSink: AgentBlockActionSink
+    private let blockID: AgentBlockID
+    private let isCodeExpanded: Bool
+    var didChangeHeight: (() -> Void)?
 
     init(
         source: String,
@@ -1321,6 +1527,15 @@ final class AgentMarkdownContentView: UIView {
         self.accentColor = context.theme.colors.accent
         self.codePointSize = context.theme.typography.codePointSize
         self.availableWidth = max(1, context.availableWidth)
+        self.fontTraits = UITraitCollection(
+            preferredContentSizeCategory: UIContentSizeCategory(
+                rawValue: context.environment.contentSizeCategory
+            )
+        )
+        self.imageProvider = context.imageProvider
+        self.actionSink = context.actionSink
+        self.blockID = context.block.id
+        self.isCodeExpanded = context.environment.expandedBlockIDs.contains(context.block.id)
         super.init(frame: .zero)
 
         stack.axis = .vertical
@@ -1336,7 +1551,7 @@ final class AgentMarkdownContentView: UIView {
         if let document {
             addRenderedViews(document)
         } else {
-            stack.addArrangedSubview(makeLabel(source))
+            stack.addArrangedSubview(makeTextView(source))
         }
     }
 
@@ -1356,25 +1571,41 @@ final class AgentMarkdownContentView: UIView {
         }
     }
 
-    private func makeView(for block: AgentMarkdownRenderBlock) -> UIView {
+    private func makeView(
+        for block: AgentMarkdownRenderBlock,
+        availableWidth nestedAvailableWidth: CGFloat? = nil
+    ) -> UIView {
+        let contentWidth = max(1, nestedAvailableWidth ?? availableWidth)
         switch block {
+        case .paragraph(let content):
+            return makeInlineContentView(
+                content,
+                font: preferredFont(forTextStyle: bodyTextStyle),
+                availableWidth: contentWidth
+            )
+
         case .heading(let level, let content):
-            let label = UILabel()
-            label.font = .preferredFont(forTextStyle: headingTextStyle(level: level))
-            label.adjustsFontForContentSizeCategory = true
-            label.textColor = bodyColor
-            label.numberOfLines = 0
-            label.text = AgentMarkdownPlainTextRenderer.inline(content)
-            return label
+            return makeInlineContentView(
+                content,
+                font: preferredFont(forTextStyle: headingTextStyle(level: level)),
+                availableWidth: contentWidth
+            )
 
         case .codeBlock(let language, let code):
-            let view = makeTextView([language, code].compactMap { $0 }.joined(separator: "\n"))
-            view.font = UIFontMetrics(forTextStyle: .body).scaledFont(
-                for: .monospacedSystemFont(ofSize: codePointSize, weight: .regular)
+            let view = AgentMarkdownCodeBlockView(
+                language: language,
+                code: code,
+                availableWidth: contentWidth,
+                pointSize: codePointSize,
+                contentSizeCategory: fontTraits.preferredContentSizeCategory,
+                textColor: bodyColor,
+                secondaryColor: secondaryColor,
+                accentColor: accentColor,
+                isExpanded: isCodeExpanded
             )
-            view.backgroundColor = .tertiarySystemFill
-            view.layer.cornerRadius = 8
-            view.textContainerInset = .init(top: 8, left: 8, bottom: 8, right: 8)
+            view.didChangeExpansion = { [actionSink, blockID] _ in
+                actionSink.send(.toggleExpanded(blockID))
+            }
             return view
 
         case .thematicBreak:
@@ -1387,37 +1618,269 @@ final class AgentMarkdownContentView: UIView {
         case .table(let table):
             return AgentMarkdownTableView(
                 table: table,
-                availableWidth: availableWidth,
+                availableWidth: contentWidth,
                 bodyTextStyle: bodyTextStyle,
+                contentSizeCategory: fontTraits.preferredContentSizeCategory,
                 bodyColor: bodyColor,
-                secondaryColor: secondaryColor
+                secondaryColor: secondaryColor,
+                accentColor: accentColor,
+                imageProvider: imageProvider,
+                actionSink: actionSink
             )
 
-        default:
-            let text = AgentMarkdownPlainTextRenderer.render(block)
-            return AgentMarkdownPlainTextRenderer.containsLink(in: block)
-                ? makeTextView(text)
-                : makeLabel(text)
+        case .image(let source, let alternativeText):
+            return AgentMarkdownImageView(
+                source: source,
+                alternativeText: alternativeText,
+                availableWidth: contentWidth,
+                tintColor: secondaryColor,
+                provider: imageProvider,
+                actionSink: actionSink
+            )
+
+        case .blockQuote(let blocks):
+            if blockContainsImage(block) {
+                return makeBlockQuoteView(blocks, availableWidth: contentWidth)
+            }
+            return makeAttributedTextView(
+                AgentMarkdownAttributedStringRenderer.block(
+                    block,
+                    font: preferredFont(forTextStyle: bodyTextStyle),
+                    color: bodyColor,
+                    secondaryColor: secondaryColor,
+                    accentColor: accentColor
+                )
+            )
+
+        case .orderedList(let start, let items):
+            if blockContainsImage(block) {
+                return makeListView(
+                    items,
+                    prefixes: items.indices.map { "\(start + $0)." },
+                    availableWidth: contentWidth
+                )
+            }
+            return makeAttributedTextView(
+                AgentMarkdownAttributedStringRenderer.block(
+                    block,
+                    font: preferredFont(forTextStyle: bodyTextStyle),
+                    color: bodyColor,
+                    secondaryColor: secondaryColor,
+                    accentColor: accentColor
+                )
+            )
+
+        case .unorderedList(let items):
+            if blockContainsImage(block) {
+                return makeListView(
+                    items,
+                    prefixes: items.map { item in
+                        item.isChecked.map { $0 ? "☑︎" : "☐" } ?? "•"
+                    },
+                    availableWidth: contentWidth
+                )
+            }
+            return makeAttributedTextView(
+                AgentMarkdownAttributedStringRenderer.block(
+                    block,
+                    font: preferredFont(forTextStyle: bodyTextStyle),
+                    color: bodyColor,
+                    secondaryColor: secondaryColor,
+                    accentColor: accentColor
+                )
+            )
+
+        case .unsupported:
+            return makeAttributedTextView(
+                AgentMarkdownAttributedStringRenderer.block(
+                    block,
+                    font: preferredFont(forTextStyle: bodyTextStyle),
+                    color: bodyColor,
+                    secondaryColor: secondaryColor,
+                    accentColor: accentColor
+                )
+            )
         }
     }
 
-    private func makeLabel(_ text: String) -> UILabel {
-        let label = UILabel()
-        label.font = .preferredFont(forTextStyle: bodyTextStyle)
-        label.adjustsFontForContentSizeCategory = true
-        label.textColor = bodyColor
-        label.numberOfLines = 0
-        label.text = text
-        return label
+    private func makeInlineContentView(
+        _ content: [AgentMarkdownInline],
+        font: UIFont,
+        availableWidth: CGFloat
+    ) -> UIView {
+        let segments = agentMarkdownInlineSegments(content)
+        guard
+            segments.contains(where: { segment in
+                if case .image = segment { return true }
+                return false
+            })
+        else {
+            return makeAttributedTextView(attributedText(for: content, font: font))
+        }
+
+        // UIKit text attachments cannot be resolved asynchronously through the host image
+        // provider. Preserve mixed Markdown in source order by rendering text runs and image
+        // previews as adjacent vertical segments instead of reducing inline images to alt text.
+        let paragraph = UIStackView()
+        paragraph.axis = .vertical
+        paragraph.spacing = 8
+
+        for segment in segments {
+            switch segment {
+            case .text(let values):
+                guard !values.isEmpty else { continue }
+                paragraph.addArrangedSubview(
+                    makeAttributedTextView(attributedText(for: values, font: font))
+                )
+            case .image(let source, let alternativeText):
+                paragraph.addArrangedSubview(
+                    AgentMarkdownImageView(
+                        source: source,
+                        alternativeText: alternativeText,
+                        availableWidth: availableWidth,
+                        tintColor: secondaryColor,
+                        provider: imageProvider,
+                        actionSink: actionSink
+                    )
+                )
+            }
+        }
+        return paragraph
+    }
+
+    private func makeBlockQuoteView(
+        _ blocks: [AgentMarkdownRenderBlock],
+        availableWidth: CGFloat
+    ) -> UIView {
+        let bar = UIView()
+        bar.backgroundColor = secondaryColor.withAlphaComponent(0.45)
+        bar.layer.cornerRadius = 1
+        bar.translatesAutoresizingMaskIntoConstraints = false
+        bar.widthAnchor.constraint(equalToConstant: 2).isActive = true
+
+        let nestedWidth = max(1, availableWidth - 10)
+        let row = UIStackView(
+            arrangedSubviews: [
+                bar,
+                makeNestedBlocksView(blocks, availableWidth: nestedWidth),
+            ]
+        )
+        row.axis = .horizontal
+        row.alignment = .fill
+        row.spacing = 8
+        return row
+    }
+
+    private func makeListView(
+        _ items: [AgentMarkdownListItem],
+        prefixes: [String],
+        availableWidth: CGFloat
+    ) -> UIView {
+        let list = UIStackView()
+        list.axis = .vertical
+        list.spacing = 8
+        for (index, item) in items.enumerated() {
+            let prefix = UILabel()
+            prefix.font = preferredFont(forTextStyle: bodyTextStyle)
+            prefix.textColor = secondaryColor
+            prefix.text = prefixes[index]
+            prefix.adjustsFontForContentSizeCategory = true
+            prefix.setContentHuggingPriority(.required, for: .horizontal)
+            prefix.setContentCompressionResistancePriority(.required, for: .horizontal)
+            let nestedWidth = max(1, availableWidth - prefix.intrinsicContentSize.width - 8)
+
+            let row = UIStackView(
+                arrangedSubviews: [
+                    prefix,
+                    makeNestedBlocksView(item.blocks, availableWidth: nestedWidth),
+                ]
+            )
+            row.axis = .horizontal
+            row.alignment = .top
+            row.spacing = 8
+            list.addArrangedSubview(row)
+        }
+        return list
+    }
+
+    private func makeNestedBlocksView(
+        _ blocks: [AgentMarkdownRenderBlock],
+        availableWidth: CGFloat
+    ) -> UIView {
+        let nested = UIStackView()
+        nested.axis = .vertical
+        nested.spacing = 6
+        for block in blocks {
+            nested.addArrangedSubview(makeView(for: block, availableWidth: availableWidth))
+        }
+        return nested
+    }
+
+    private func blockContainsImage(_ block: AgentMarkdownRenderBlock) -> Bool {
+        switch block {
+        case .paragraph(let content), .heading(_, let content):
+            return inlineContainsImage(content)
+        case .blockQuote(let blocks):
+            return blocks.contains(where: blockContainsImage)
+        case .orderedList(_, let items), .unorderedList(let items):
+            return items.flatMap(\.blocks).contains(where: blockContainsImage)
+        case .table(let table):
+            return ([table.header] + table.rows).flatMap { $0 }.contains(
+                where: inlineContainsImage)
+        case .image:
+            return true
+        case .thematicBreak, .codeBlock, .unsupported:
+            return false
+        }
+    }
+
+    private func inlineContainsImage(_ content: [AgentMarkdownInline]) -> Bool {
+        content.contains { value in
+            switch value {
+            case .image:
+                return true
+            case .emphasis(let nested), .strong(let nested), .strikethrough(let nested):
+                return inlineContainsImage(nested)
+            case .link(_, _, let nested):
+                return inlineContainsImage(nested)
+            case .text, .code, .softBreak, .hardBreak, .unsupported:
+                return false
+            }
+        }
+    }
+
+    private func attributedText(
+        for content: [AgentMarkdownInline],
+        font: UIFont
+    ) -> NSAttributedString {
+        AgentMarkdownAttributedStringRenderer.inline(
+            content,
+            font: font,
+            color: bodyColor,
+            accentColor: accentColor
+        )
     }
 
     private func makeTextView(_ text: String) -> AgentSelectableTextView {
         let view = AgentSelectableTextView()
-        view.font = .preferredFont(forTextStyle: bodyTextStyle)
+        view.font = preferredFont(forTextStyle: bodyTextStyle)
         view.adjustsFontForContentSizeCategory = true
         view.textColor = bodyColor
         view.linkTextAttributes = [.foregroundColor: accentColor]
         view.text = text
+        view.onOpenURL = { [actionSink] url in actionSink.send(.openLink(url)) }
+        return view
+    }
+
+    private func makeAttributedTextView(_ text: NSAttributedString) -> AgentSelectableTextView {
+        let view = AgentSelectableTextView()
+        view.adjustsFontForContentSizeCategory = true
+        view.linkTextAttributes = [
+            .foregroundColor: accentColor,
+            .underlineStyle: NSUnderlineStyle.single.rawValue,
+        ]
+        view.attributedText = text
+        view.onOpenURL = { [actionSink] url in actionSink.send(.openLink(url)) }
         return view
     }
 
@@ -1429,11 +1892,567 @@ final class AgentMarkdownContentView: UIView {
         }
     }
 
+    private func preferredFont(forTextStyle style: UIFont.TextStyle) -> UIFont {
+        UIFont.preferredFont(forTextStyle: style, compatibleWith: fontTraits)
+    }
+
     private func removeRenderedViews() {
         for view in stack.arrangedSubviews {
             stack.removeArrangedSubview(view)
             view.removeFromSuperview()
         }
+    }
+}
+
+@MainActor
+enum AgentMarkdownAttributedStringRenderer {
+    static func block(
+        _ block: AgentMarkdownRenderBlock,
+        font: UIFont,
+        color: UIColor,
+        secondaryColor: UIColor,
+        accentColor: UIColor
+    ) -> NSAttributedString {
+        switch block {
+        case .paragraph(let content), .heading(_, let content):
+            return inline(content, font: font, color: color, accentColor: accentColor)
+        case .blockQuote(let blocks):
+            let result = NSMutableAttributedString()
+            for (index, nested) in blocks.enumerated() {
+                if index > 0 { result.append(NSAttributedString(string: "\n")) }
+                result.append(
+                    NSAttributedString(
+                        string: "▌ ",
+                        attributes: [.font: font, .foregroundColor: secondaryColor]
+                    )
+                )
+                result.append(
+                    Self.block(
+                        nested,
+                        font: font,
+                        color: color,
+                        secondaryColor: secondaryColor,
+                        accentColor: accentColor
+                    )
+                )
+            }
+            return result
+        case .orderedList(let start, let items):
+            return list(
+                items,
+                prefixes: items.indices.map { "\(start + $0). " },
+                font: font,
+                color: color,
+                secondaryColor: secondaryColor,
+                accentColor: accentColor
+            )
+        case .unorderedList(let items):
+            return list(
+                items,
+                prefixes: items.map { item in
+                    item.isChecked.map { $0 ? "☑︎ " : "☐ " } ?? "• "
+                },
+                font: font,
+                color: color,
+                secondaryColor: secondaryColor,
+                accentColor: accentColor
+            )
+        case .unsupported(let raw):
+            return NSAttributedString(
+                string: raw,
+                attributes: [.font: font, .foregroundColor: secondaryColor]
+            )
+        case .thematicBreak, .codeBlock, .table, .image:
+            return NSAttributedString(
+                string: AgentMarkdownPlainTextRenderer.render(block),
+                attributes: [.font: font, .foregroundColor: color]
+            )
+        }
+    }
+
+    static func inline(
+        _ content: [AgentMarkdownInline],
+        font: UIFont,
+        color: UIColor,
+        accentColor: UIColor
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        for value in content {
+            switch value {
+            case .text(let text), .unsupported(let text):
+                result.append(styled(text, font: font, color: color))
+            case .emphasis(let nested):
+                result.append(
+                    inline(
+                        nested,
+                        font: font.withTraits(.traitItalic),
+                        color: color,
+                        accentColor: accentColor
+                    )
+                )
+            case .strong(let nested):
+                result.append(
+                    inline(
+                        nested,
+                        font: font.withTraits(.traitBold),
+                        color: color,
+                        accentColor: accentColor
+                    )
+                )
+            case .strikethrough(let nested):
+                let value = NSMutableAttributedString(
+                    attributedString: inline(
+                        nested,
+                        font: font,
+                        color: color,
+                        accentColor: accentColor
+                    )
+                )
+                value.addAttribute(
+                    .strikethroughStyle,
+                    value: NSUnderlineStyle.single.rawValue,
+                    range: NSRange(location: 0, length: value.length)
+                )
+                result.append(value)
+            case .code(let code):
+                result.append(
+                    NSAttributedString(
+                        string: code,
+                        attributes: [
+                            .font: UIFont.monospacedSystemFont(
+                                ofSize: max(11, font.pointSize * 0.92),
+                                weight: .regular
+                            ),
+                            .foregroundColor: color,
+                            .backgroundColor: UIColor.tertiarySystemFill,
+                        ]
+                    )
+                )
+            case .link(let destination, _, let nested):
+                let link = NSMutableAttributedString(
+                    attributedString: inline(
+                        nested,
+                        font: font,
+                        color: accentColor,
+                        accentColor: accentColor
+                    )
+                )
+                if let destination, let url = URL(string: destination), link.length > 0 {
+                    link.addAttribute(
+                        .link,
+                        value: url,
+                        range: NSRange(location: 0, length: link.length)
+                    )
+                }
+                result.append(link)
+            case .image(_, let alternativeText):
+                result.append(styled("[\(alternativeText)]", font: font, color: color))
+            case .softBreak:
+                result.append(styled(" ", font: font, color: color))
+            case .hardBreak:
+                result.append(styled("\n", font: font, color: color))
+            }
+        }
+        return result
+    }
+
+    private static func list(
+        _ items: [AgentMarkdownListItem],
+        prefixes: [String],
+        font: UIFont,
+        color: UIColor,
+        secondaryColor: UIColor,
+        accentColor: UIColor
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        for (index, item) in items.enumerated() {
+            if index > 0 { result.append(NSAttributedString(string: "\n")) }
+            result.append(styled(prefixes[index], font: font, color: secondaryColor))
+            for (blockIndex, nested) in item.blocks.enumerated() {
+                if blockIndex > 0 { result.append(NSAttributedString(string: "\n  ")) }
+                result.append(
+                    block(
+                        nested,
+                        font: font,
+                        color: color,
+                        secondaryColor: secondaryColor,
+                        accentColor: accentColor
+                    )
+                )
+            }
+        }
+        return result
+    }
+
+    private static func styled(_ text: String, font: UIFont, color: UIColor) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
+    }
+}
+
+extension UIFont {
+    fileprivate func withTraits(_ traits: UIFontDescriptor.SymbolicTraits) -> UIFont {
+        guard
+            let descriptor = fontDescriptor.withSymbolicTraits(
+                fontDescriptor.symbolicTraits.union(traits)
+            )
+        else { return self }
+        return UIFont(descriptor: descriptor, size: pointSize)
+    }
+}
+
+@MainActor
+final class AgentMarkdownCodeBlockView: UIView {
+    static let collapsedLineCount = 16
+    static let maximumRenderedCharacterCount = 32_000
+    static let maximumRenderedLineCount = 500
+    static let maximumMeasuredCharacterCount = 16_000
+    static let maximumMeasuredLineCharacterCount = 512
+    static let maximumContentWidth: CGFloat = 4_096
+
+    var didChangeHeight: (() -> Void)?
+    var didChangeExpansion: ((Bool) -> Void)?
+    var copyHandler: (String) -> Void = { UIPasteboard.general.string = $0 }
+
+    private let code: String
+    private let lineCount: Int
+    private let font: UIFont
+    private let scrollView = UIScrollView()
+    private let codeView = AgentSelectableTextView()
+    private let toggleButton = UIButton(type: .system)
+    private var viewportHeightConstraint: NSLayoutConstraint!
+    private var isExpanded: Bool
+
+    init(
+        language: String?,
+        code: String,
+        availableWidth: CGFloat,
+        pointSize: CGFloat,
+        contentSizeCategory: UIContentSizeCategory,
+        textColor: UIColor,
+        secondaryColor: UIColor,
+        accentColor: UIColor,
+        isExpanded: Bool = false
+    ) {
+        let boundedCode = Self.boundedCode(code)
+        let displayedCode = boundedCode.text
+        self.code = code
+        let fontTraits = UITraitCollection(preferredContentSizeCategory: contentSizeCategory)
+        self.font = UIFontMetrics(forTextStyle: .body).scaledFont(
+            for: .monospacedSystemFont(ofSize: pointSize, weight: .regular),
+            compatibleWith: fontTraits
+        )
+        let contentWidth = Self.contentWidth(
+            for: displayedCode,
+            availableWidth: availableWidth,
+            font: self.font
+        )
+        self.lineCount = Self.visualLineCount(
+            in: displayedCode,
+            contentWidth: contentWidth,
+            font: self.font
+        )
+        self.isExpanded = isExpanded
+        super.init(frame: .zero)
+
+        backgroundColor = .tertiarySystemFill
+        layer.cornerRadius = 10
+        layer.cornerCurve = .continuous
+        clipsToBounds = true
+        accessibilityIdentifier = "AgentMarkdownCodeBlock"
+
+        let languageLabel = UILabel()
+        languageLabel.font = .preferredFont(
+            forTextStyle: .caption1,
+            compatibleWith: fontTraits
+        )
+        languageLabel.adjustsFontForContentSizeCategory = true
+        languageLabel.textColor = secondaryColor
+        let languageTitle = language.flatMap { $0.isEmpty ? nil : $0 } ?? AgentStrings.code
+        languageLabel.text =
+            boundedCode.wasTruncated
+            ? "\(languageTitle) · \(AgentStrings.codeTruncated)"
+            : languageTitle
+
+        var copyConfiguration = UIButton.Configuration.plain()
+        copyConfiguration.title = AgentStrings.copy
+        copyConfiguration.image = UIImage(systemName: "doc.on.doc")
+        copyConfiguration.imagePadding = 4
+        copyConfiguration.baseForegroundColor = accentColor
+        let copyButton = UIButton(configuration: copyConfiguration)
+        copyButton.isPointerInteractionEnabled = true
+        copyButton.accessibilityIdentifier = "AgentMarkdownCodeCopyButton"
+        copyButton.addAction(
+            UIAction { [weak self] _ in
+                guard let self else { return }
+                self.copyHandler(self.code)
+            }, for: .touchUpInside)
+
+        let header = UIStackView(arrangedSubviews: [languageLabel, UIView(), copyButton])
+        header.axis = .horizontal
+        header.alignment = .center
+        header.layoutMargins = .init(top: 2, left: 10, bottom: 2, right: 4)
+        header.isLayoutMarginsRelativeArrangement = true
+        header.heightAnchor.constraint(greaterThanOrEqualToConstant: 36).isActive = true
+
+        scrollView.showsHorizontalScrollIndicator = true
+        scrollView.showsVerticalScrollIndicator = false
+        scrollView.alwaysBounceHorizontal = false
+        scrollView.alwaysBounceVertical = false
+        scrollView.isDirectionalLockEnabled = true
+        scrollView.accessibilityIdentifier = "AgentMarkdownCodeScrollView"
+
+        codeView.font = font
+        codeView.textColor = textColor
+        codeView.text = displayedCode
+        codeView.textContainerInset = .init(top: 8, left: 10, bottom: 8, right: 10)
+        codeView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.addSubview(codeView)
+        NSLayoutConstraint.activate([
+            codeView.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor),
+            codeView.trailingAnchor.constraint(
+                equalTo: scrollView.contentLayoutGuide.trailingAnchor),
+            codeView.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor),
+            codeView.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor),
+            codeView.widthAnchor.constraint(equalToConstant: contentWidth),
+            codeView.heightAnchor.constraint(equalTo: scrollView.frameLayoutGuide.heightAnchor),
+        ])
+
+        toggleButton.configuration = .plain()
+        toggleButton.isPointerInteractionEnabled = true
+        toggleButton.configuration?.title =
+            isExpanded ? AgentStrings.showLess : AgentStrings.showMore
+        toggleButton.configuration?.image = UIImage(
+            systemName: isExpanded ? "chevron.up" : "chevron.down"
+        )
+        toggleButton.configuration?.imagePadding = 5
+        toggleButton.configuration?.baseForegroundColor = accentColor
+        toggleButton.accessibilityIdentifier = "AgentMarkdownCodeDisclosureButton"
+        toggleButton.isHidden = lineCount <= Self.collapsedLineCount
+        toggleButton.addAction(
+            UIAction { [weak self] _ in self?.toggleExpanded() }, for: .touchUpInside)
+        toggleButton.heightAnchor.constraint(greaterThanOrEqualToConstant: 36).isActive = true
+
+        let stack = UIStackView(arrangedSubviews: [header, scrollView, toggleButton])
+        stack.axis = .vertical
+        stack.spacing = 0
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+        viewportHeightConstraint = scrollView.heightAnchor.constraint(
+            equalToConstant: Self.viewportHeight(
+                lineCount: isExpanded ? lineCount : min(lineCount, Self.collapsedLineCount),
+                font: font
+            )
+        )
+        viewportHeightConstraint.isActive = true
+        accessibilityValue = isExpanded ? AgentStrings.collapse : AgentStrings.expand
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    static func renderedLineCount(
+        for code: String,
+        availableWidth: CGFloat,
+        font: UIFont
+    ) -> Int {
+        let displayedCode = boundedCode(code).text
+        return visualLineCount(
+            in: displayedCode,
+            contentWidth: contentWidth(
+                for: displayedCode,
+                availableWidth: availableWidth,
+                font: font
+            ),
+            font: font
+        )
+    }
+
+    static func height(lineCount: Int, font: UIFont) -> CGFloat {
+        let visible = min(max(1, lineCount), collapsedLineCount)
+        return 36 + viewportHeight(lineCount: visible, font: font)
+            + (lineCount > collapsedLineCount ? 36 : 0)
+    }
+
+    private static func viewportHeight(lineCount: Int, font: UIFont) -> CGFloat {
+        ceil(CGFloat(max(1, lineCount)) * font.lineHeight) + 16
+    }
+
+    private static func boundedCode(_ code: String) -> (text: String, wasTruncated: Bool) {
+        let characterEnd =
+            code.index(
+                code.startIndex,
+                offsetBy: maximumRenderedCharacterCount,
+                limitedBy: code.endIndex
+            ) ?? code.endIndex
+        var displayEnd = characterEnd
+        var lineCount = 1
+        var index = code.startIndex
+        while index < characterEnd {
+            if code[index] == "\n" {
+                lineCount += 1
+                if lineCount > maximumRenderedLineCount {
+                    displayEnd = index
+                    break
+                }
+            }
+            code.formIndex(after: &index)
+        }
+        guard displayEnd < code.endIndex else { return (code, false) }
+        return (String(code[..<displayEnd]) + "\n…", true)
+    }
+
+    private static func contentWidth(
+        for code: String,
+        availableWidth: CGFloat,
+        font: UIFont
+    ) -> CGFloat {
+        let measurementSample = String(code.prefix(maximumMeasuredCharacterCount))
+        let longestLineWidth =
+            measurementSample.split(separator: "\n", omittingEmptySubsequences: false)
+            .map {
+                (String($0.prefix(maximumMeasuredLineCharacterCount)) as NSString)
+                    .size(withAttributes: [.font: font]).width
+            }
+            .max() ?? 0
+        return max(
+            max(1, availableWidth),
+            min(maximumContentWidth, ceil(longestLineWidth) + 24)
+        )
+    }
+
+    private static func visualLineCount(
+        in code: String,
+        contentWidth: CGFloat,
+        font: UIFont
+    ) -> Int {
+        let textStorage = NSTextStorage(string: code, attributes: [.font: font])
+        let layoutManager = NSLayoutManager()
+        let textContainer = NSTextContainer(
+            size: CGSize(
+                width: max(1, contentWidth - 20),
+                height: .greatestFiniteMagnitude
+            )
+        )
+        textContainer.lineFragmentPadding = 0
+        layoutManager.addTextContainer(textContainer)
+        textStorage.addLayoutManager(layoutManager)
+        layoutManager.ensureLayout(for: textContainer)
+
+        var count = 0
+        layoutManager.enumerateLineFragments(
+            forGlyphRange: layoutManager.glyphRange(for: textContainer)
+        ) { _, _, _, _, _ in
+            count += 1
+        }
+        if layoutManager.extraLineFragmentRect.height > 0 { count += 1 }
+        return max(1, count)
+    }
+
+    private func toggleExpanded() {
+        isExpanded.toggle()
+        viewportHeightConstraint.constant = Self.viewportHeight(
+            lineCount: isExpanded ? lineCount : min(lineCount, Self.collapsedLineCount),
+            font: font
+        )
+        toggleButton.configuration?.title =
+            isExpanded ? AgentStrings.showLess : AgentStrings.showMore
+        toggleButton.configuration?.image = UIImage(
+            systemName: isExpanded ? "chevron.up" : "chevron.down"
+        )
+        accessibilityValue = isExpanded ? AgentStrings.collapse : AgentStrings.expand
+        invalidateIntrinsicContentSize()
+        if let didChangeExpansion {
+            didChangeExpansion(isExpanded)
+        } else {
+            didChangeHeight?()
+        }
+    }
+}
+
+@MainActor
+final class AgentMarkdownImageView: UIView {
+    private var loadTask: Task<Void, Never>?
+
+    init(
+        source: String?,
+        alternativeText: String,
+        availableWidth: CGFloat,
+        tintColor: UIColor,
+        provider: (any AgentImageProviding)?,
+        actionSink: AgentBlockActionSink
+    ) {
+        super.init(frame: .zero)
+        let width = min(max(1, availableWidth), 560)
+        let preview = AgentInlineImagePreviewView(
+            size: .init(width: width, height: max(140, width * 0.5625)),
+            tintColor: tintColor,
+            alternativeText: alternativeText
+        )
+        let row = UIStackView(arrangedSubviews: [preview, UIView()])
+        row.axis = .horizontal
+        row.alignment = .top
+        row.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(row)
+        NSLayoutConstraint.activate([
+            row.leadingAnchor.constraint(equalTo: leadingAnchor),
+            row.trailingAnchor.constraint(equalTo: trailingAnchor),
+            row.topAnchor.constraint(equalTo: topAnchor),
+            row.bottomAnchor.constraint(equalTo: bottomAnchor),
+        ])
+
+        guard let reference = Self.reference(for: source) else {
+            preview.showMessage(AgentStrings.imageUnavailable)
+            return
+        }
+        preview.onTap = {
+            actionSink.send(
+                .previewImage(reference: reference, alternativeText: alternativeText)
+            )
+        }
+        guard let provider else {
+            preview.showMessage(AgentStrings.imageProvidedByHost)
+            return
+        }
+        preview.showLoading()
+        loadTask = Task { [weak preview] in
+            do {
+                let image = try await provider.image(
+                    for: reference,
+                    targetSize: preview?.targetSize ?? .zero,
+                    scale: UIScreen.main.scale
+                )
+                try Task.checkCancellation()
+                preview?.show(image: image, alternativeText: alternativeText)
+            } catch is CancellationError {
+                return
+            } catch {
+                preview?.showMessage(AgentStrings.imageUnavailable)
+            }
+        }
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    func waitForLoad() async { await loadTask?.value }
+
+    deinit { loadTask?.cancel() }
+
+    private static func reference(for source: String?) -> AgentResourceReference? {
+        guard let source, !source.isEmpty else { return nil }
+        if let url = URL(string: source), let scheme = url.scheme?.lowercased(),
+            ["http", "https"].contains(scheme)
+        {
+            return .remoteURL(url)
+        }
+        if source.hasPrefix("runtime://") { return .runtimeURI(source) }
+        return .localIdentifier(source)
     }
 }
 
@@ -1445,20 +2464,26 @@ final class AgentMarkdownTableView: UIScrollView {
         table: AgentMarkdownTable,
         availableWidth: CGFloat,
         bodyTextStyle: UIFont.TextStyle,
+        contentSizeCategory: UIContentSizeCategory,
         bodyColor: UIColor,
-        secondaryColor: UIColor
+        secondaryColor: UIColor,
+        accentColor: UIColor,
+        imageProvider: (any AgentImageProviding)?,
+        actionSink: AgentBlockActionSink
     ) {
         let rows = [table.header] + table.rows
         let columnCount = max(1, rows.map(\.count).max() ?? 0)
         let columnWidth = max(120, floor(availableWidth / CGFloat(columnCount)))
-        let font = UIFont.preferredFont(forTextStyle: bodyTextStyle)
-        let headerFont = UIFont.preferredFont(forTextStyle: .headline)
+        let fontTraits = UITraitCollection(preferredContentSizeCategory: contentSizeCategory)
+        let font = UIFont.preferredFont(forTextStyle: bodyTextStyle, compatibleWith: fontTraits)
+        let headerFont = UIFont.preferredFont(forTextStyle: .headline, compatibleWith: fontTraits)
         let rowHeights = rows.enumerated().map { index, row in
             Self.rowHeight(
                 row: row,
                 columnCount: columnCount,
                 columnWidth: columnWidth,
-                font: index == 0 ? headerFont : font
+                font: index == 0 ? headerFont : font,
+                accentColor: accentColor
             )
         }
         self.renderedHeight = max(44, rowHeights.reduce(0, +))
@@ -1493,12 +2518,9 @@ final class AgentMarkdownTableView: UIScrollView {
             rowView.heightAnchor.constraint(equalToConstant: rowHeights[rowIndex]).isActive = true
 
             for columnIndex in 0..<columnCount {
-                let text =
-                    columnIndex < row.count
-                    ? AgentMarkdownPlainTextRenderer.inline(row[columnIndex])
-                    : ""
+                let content = columnIndex < row.count ? row[columnIndex] : []
                 let cell = Self.makeCell(
-                    text: text,
+                    content: content,
                     columnTitle: columnIndex < headerTitles.count
                         ? headerTitles[columnIndex] : "",
                     alignment: columnIndex < table.alignments.count
@@ -1507,7 +2529,10 @@ final class AgentMarkdownTableView: UIScrollView {
                     width: columnWidth,
                     font: rowIndex == 0 ? headerFont : font,
                     bodyColor: bodyColor,
-                    secondaryColor: secondaryColor
+                    secondaryColor: secondaryColor,
+                    accentColor: accentColor,
+                    imageProvider: imageProvider,
+                    actionSink: actionSink
                 )
                 rowView.addArrangedSubview(cell)
             }
@@ -1525,22 +2550,26 @@ final class AgentMarkdownTableView: UIScrollView {
     static func height(
         for table: AgentMarkdownTable,
         availableWidth: CGFloat,
-        bodyTextStyle: UIFont.TextStyle
+        bodyTextStyle: UIFont.TextStyle,
+        contentSizeCategory: UIContentSizeCategory
     ) -> CGFloat {
         let rows = [table.header] + table.rows
         let columnCount = max(1, rows.map(\.count).max() ?? 0)
         let columnWidth = max(120, floor(availableWidth / CGFloat(columnCount)))
-        let font = UIFont.preferredFont(forTextStyle: bodyTextStyle)
-        let headerFont = UIFont.preferredFont(forTextStyle: .headline)
+        let fontTraits = UITraitCollection(preferredContentSizeCategory: contentSizeCategory)
+        let font = UIFont.preferredFont(forTextStyle: bodyTextStyle, compatibleWith: fontTraits)
+        let headerFont = UIFont.preferredFont(forTextStyle: .headline, compatibleWith: fontTraits)
         return max(
             44,
             rows.enumerated().reduce(CGFloat.zero) { result, value in
-                result + rowHeight(
-                    row: value.element,
-                    columnCount: columnCount,
-                    columnWidth: columnWidth,
-                    font: value.offset == 0 ? headerFont : font
-                )
+                result
+                    + rowHeight(
+                        row: value.element,
+                        columnCount: columnCount,
+                        columnWidth: columnWidth,
+                        font: value.offset == 0 ? headerFont : font,
+                        accentColor: .link
+                    )
             }
         )
     }
@@ -1549,35 +2578,95 @@ final class AgentMarkdownTableView: UIScrollView {
         row: [[AgentMarkdownInline]],
         columnCount: Int,
         columnWidth: CGFloat,
-        font: UIFont
+        font: UIFont,
+        accentColor: UIColor
     ) -> CGFloat {
         let contentHeight =
             (0..<columnCount).map { index -> CGFloat in
-                let text =
-                    index < row.count
-                    ? AgentMarkdownPlainTextRenderer.inline(row[index])
-                    : ""
-                let rect = (text as NSString).boundingRect(
-                    with: .init(width: columnWidth - 24, height: .greatestFiniteMagnitude),
-                    options: [.usesFontLeading, .usesLineFragmentOrigin],
-                    attributes: [.font: font],
-                    context: nil
-                )
-                return ceil(rect.height) + 20
+                let content = index < row.count ? row[index] : []
+                return inlineContentHeight(
+                    content,
+                    width: max(1, columnWidth - 24),
+                    font: font,
+                    accentColor: accentColor
+                ) + 20
             }.max() ?? 44
         return max(44, contentHeight)
     }
 
+    private static func inlineContentHeight(
+        _ content: [AgentMarkdownInline],
+        width: CGFloat,
+        font: UIFont,
+        accentColor: UIColor
+    ) -> CGFloat {
+        let segments = agentMarkdownInlineSegments(content)
+        let heights = segments.map { segment -> CGFloat in
+            switch segment {
+            case .text(let values):
+                let attributed = AgentMarkdownAttributedStringRenderer.inline(
+                    values,
+                    font: font,
+                    color: .label,
+                    accentColor: accentColor
+                )
+                return ceil(
+                    attributed.boundingRect(
+                        with: .init(width: width, height: .greatestFiniteMagnitude),
+                        options: [.usesFontLeading, .usesLineFragmentOrigin],
+                        context: nil
+                    ).height
+                )
+            case .image:
+                let previewWidth = min(max(1, width), 560)
+                return max(140, previewWidth * 0.5625)
+            }
+        }
+        return heights.reduce(0, +) + CGFloat(max(0, heights.count - 1)) * 6
+    }
+
     private static func makeCell(
-        text: String,
+        content: [AgentMarkdownInline],
         columnTitle: String,
         alignment: AgentMarkdownTable.Alignment,
         isHeader: Bool,
         width: CGFloat,
         font: UIFont,
         bodyColor: UIColor,
-        secondaryColor: UIColor
+        secondaryColor: UIColor,
+        accentColor: UIColor,
+        imageProvider: (any AgentImageProviding)?,
+        actionSink: AgentBlockActionSink
     ) -> UIView {
+        let plainText = AgentMarkdownPlainTextRenderer.inline(content)
+        let segments = agentMarkdownInlineSegments(content)
+        let attributedSegments = segments.compactMap { segment -> NSAttributedString? in
+            guard case .text(let values) = segment else { return nil }
+            return AgentMarkdownAttributedStringRenderer.inline(
+                values,
+                font: font,
+                color: isHeader ? bodyColor : secondaryColor,
+                accentColor: accentColor
+            )
+        }
+        let hasImage = segments.contains { segment in
+            if case .image = segment { return true }
+            return false
+        }
+        let hasLink = attributedSegments.contains { attributed in
+            var found = false
+            attributed.enumerateAttribute(
+                .link,
+                in: NSRange(location: 0, length: attributed.length)
+            ) { value, _, stop in
+                guard value != nil else { return }
+                found = true
+                stop.pointee = true
+            }
+            return found
+        }
+        let hasInteractiveContent = hasImage || hasLink
+
         let container = UIView()
         container.backgroundColor =
             isHeader
@@ -1587,30 +2676,68 @@ final class AgentMarkdownTableView: UIScrollView {
         container.layer.borderColor = UIColor.separator.cgColor
         container.widthAnchor.constraint(equalToConstant: width).isActive = true
         container.accessibilityIdentifier = "AgentMarkdownTableCell"
-        container.isAccessibilityElement = true
+        container.isAccessibilityElement = !hasInteractiveContent
         container.accessibilityLabel =
             columnTitle.isEmpty
-            ? text : "\(columnTitle): \(text)"
+            ? plainText : "\(columnTitle): \(plainText)"
         container.accessibilityTraits = isHeader ? [.header] : [.staticText]
 
-        let label = UILabel()
-        label.font = font
-        label.adjustsFontForContentSizeCategory = true
-        label.textColor = isHeader ? bodyColor : secondaryColor
-        label.numberOfLines = 0
-        label.text = text
-        switch alignment {
-        case .center: label.textAlignment = .center
-        case .trailing: label.textAlignment = .right
-        case .leading, .unspecified: label.textAlignment = .natural
+        let contentStack = UIStackView()
+        contentStack.axis = .vertical
+        contentStack.spacing = 6
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        var textSegmentIndex = 0
+        for segment in segments {
+            switch segment {
+            case .text:
+                let attributed = attributedSegments[textSegmentIndex]
+                textSegmentIndex += 1
+                let textView = AgentSelectableTextView()
+                textView.adjustsFontForContentSizeCategory = true
+                textView.attributedText = attributed
+                textView.linkTextAttributes = [
+                    .foregroundColor: accentColor,
+                    .underlineStyle: NSUnderlineStyle.single.rawValue,
+                ]
+                textView.onOpenURL = { url in actionSink.send(.openLink(url)) }
+                textView.isAccessibilityElement = hasInteractiveContent
+                if hasInteractiveContent, textSegmentIndex == 1, !columnTitle.isEmpty {
+                    textView.accessibilityLabel = "\(columnTitle): \(attributed.string)"
+                }
+                if isHeader { textView.accessibilityTraits.insert(.header) }
+                switch alignment {
+                case .center: textView.textAlignment = .center
+                case .trailing: textView.textAlignment = .right
+                case .leading, .unspecified: textView.textAlignment = .natural
+                }
+                contentStack.addArrangedSubview(textView)
+            case .image(let source, let alternativeText):
+                contentStack.addArrangedSubview(
+                    AgentMarkdownImageView(
+                        source: source,
+                        alternativeText: alternativeText,
+                        availableWidth: max(1, width - 24),
+                        tintColor: secondaryColor,
+                        provider: imageProvider,
+                        actionSink: actionSink
+                    )
+                )
+            }
         }
-        label.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(label)
+        if segments.isEmpty {
+            let empty = AgentSelectableTextView()
+            empty.font = font
+            empty.text = ""
+            empty.isAccessibilityElement = false
+            contentStack.addArrangedSubview(empty)
+        }
+        container.addSubview(contentStack)
         NSLayoutConstraint.activate([
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
-            label.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -12),
-            label.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
-            label.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
+            contentStack.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 12),
+            contentStack.trailingAnchor.constraint(
+                equalTo: container.trailingAnchor, constant: -12),
+            contentStack.topAnchor.constraint(equalTo: container.topAnchor, constant: 10),
+            contentStack.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -10),
         ])
         return container
     }
@@ -1716,7 +2843,9 @@ final class AgentInlineImagePreviewView: UIView {
 }
 
 @MainActor
-final class AgentSelectableTextView: UITextView {
+final class AgentSelectableTextView: UITextView, UITextViewDelegate {
+    var onOpenURL: ((URL) -> Void)?
+
     override init(frame: CGRect, textContainer: NSTextContainer?) {
         super.init(frame: frame, textContainer: textContainer)
         isEditable = false
@@ -1726,11 +2855,31 @@ final class AgentSelectableTextView: UITextView {
         textContainerInset = .zero
         self.textContainer.lineFragmentPadding = 0
         dataDetectorTypes = [.link]
+        delegate = self
         setContentCompressionResistancePriority(.required, for: .vertical)
     }
 
     @available(*, unavailable)
     required init?(coder: NSCoder) { nil }
+
+    func textView(
+        _ textView: UITextView,
+        primaryActionFor textItem: UITextItem,
+        defaultAction: UIAction
+    ) -> UIAction? {
+        guard textItem.range.location < textStorage.length else { return defaultAction }
+        let value = textStorage.attribute(.link, at: textItem.range.location, effectiveRange: nil)
+        let link: URL?
+        if let url = value as? URL {
+            link = url
+        } else if let string = value as? String {
+            link = URL(string: string)
+        } else {
+            link = nil
+        }
+        guard let link else { return defaultAction }
+        return UIAction { [weak self] _ in self?.onOpenURL?(link) }
+    }
 }
 
 @MainActor
@@ -1738,6 +2887,7 @@ final class AgentDefaultBlockRenderer: AgentTableBlockRenderer {
     let supportedKinds: Set<AgentBlockKind>
     private let parser = AgentMarkdownParser()
     private let cache = AgentMarkdownDocumentCache()
+    private let diffParser = AgentUnifiedDiffParser()
     private let preparedMarkdownCache = AgentPreparedMarkdownCache()
 
     init(supportedKinds: Set<AgentBlockKind>) { self.supportedKinds = supportedKinds }
@@ -1762,7 +2912,19 @@ final class AgentDefaultBlockRenderer: AgentTableBlockRenderer {
         else {
             return UICollectionViewCell()
         }
-        cell.configure(context: context, parser: parser, cache: cache)
+        let key = markdownKeyIfNeeded(for: context)
+        let document = key.flatMap { preparedMarkdownCache.document(for: $0) }
+        cell.configure(
+            context: context,
+            parser: parser,
+            cache: cache,
+            diffParser: diffParser,
+            preparedMarkdownDocument: document,
+            didPrepareMarkdown: { [weak self] document in
+                guard let self, let key else { return }
+                self.preparedMarkdownCache.insert(document, for: key)
+            }
+        )
         return cell
     }
 
@@ -1785,11 +2947,17 @@ final class AgentDefaultBlockRenderer: AgentTableBlockRenderer {
             ) as? AgentTableBlockCell
         else { return UITableViewCell() }
         let document = preparedMarkdownDocument(for: context)
+        let key = markdownKeyIfNeeded(for: context)
         cell.configure(
             context: context,
             parser: parser,
             cache: cache,
-            preparedMarkdownDocument: document
+            diffParser: diffParser,
+            preparedMarkdownDocument: document,
+            didPrepareMarkdown: { [weak self] document in
+                guard let self, let key else { return }
+                self.preparedMarkdownCache.insert(document, for: key)
+            }
         )
         return cell
     }
@@ -1797,12 +2965,16 @@ final class AgentDefaultBlockRenderer: AgentTableBlockRenderer {
     private func preparedMarkdownDocument(
         for context: AgentBlockRenderContext
     ) -> AgentMarkdownRenderDocument? {
-        guard case .markdown(let markdown) = context.block.content else { return nil }
+        guard case .markdown = context.block.content else { return nil }
         let key = markdownKey(for: context)
-        if let document = preparedMarkdownCache.document(for: key) { return document }
-        let document = parser.parseImmediately(markdown.markdown)
-        preparedMarkdownCache.insert(document, for: key)
-        return document
+        return preparedMarkdownCache.document(for: key)
+    }
+
+    private func markdownKeyIfNeeded(
+        for context: AgentBlockRenderContext
+    ) -> AgentMarkdownCacheKey? {
+        guard case .markdown = context.block.content else { return nil }
+        return markdownKey(for: context)
     }
 
     private func markdownKey(for context: AgentBlockRenderContext) -> AgentMarkdownCacheKey {
@@ -1825,10 +2997,29 @@ extension AgentDefaultBlockRenderer: AgentTableBlockLayoutProviding {
             guard let document = preparedMarkdownDocument(for: context) else {
                 return UITableView.automaticDimension
             }
+            // A disclosure changes the code viewport without changing the block revision.
+            // Let UITableView read Auto Layout for these rows instead of pinning them to
+            // the cached collapsed calculation.
+            guard
+                !AgentTableBlockLayoutCalculator.markdownRequiresSelfSizing(
+                    document,
+                    context: context
+                )
+            else {
+                return UITableView.automaticDimension
+            }
             return AgentTableBlockLayoutCalculator.markdownHeight(document, context: context)
         default:
             return UITableView.automaticDimension
         }
+    }
+}
+
+extension AgentDefaultBlockRenderer: AgentBlockRendererCacheManaging {
+    func removeCachedData() {
+        preparedMarkdownCache.removeAll()
+        Task { await cache.removeAll() }
+        Task { await diffParser.removeAllCachedResults() }
     }
 }
 

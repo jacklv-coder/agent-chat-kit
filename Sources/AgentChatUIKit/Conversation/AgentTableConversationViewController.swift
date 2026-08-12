@@ -35,6 +35,9 @@ public final class AgentTableConversationViewController: UIViewController {
     private var pendingAnimatedRowReconfigurationBlockIDs: Set<AgentBlockID> = []
     private var pendingHeightChangeBlockIDs: Set<AgentBlockID> = []
     private var needsInitialScrollToLatest = true
+    private var pendingViewportResizeAnchor: AgentLayoutAnchor?
+    private var pendingViewportResizeRestorationAnchor: AgentLayoutAnchor?
+    private var pendingViewportResizeWasFollowingLatest = false
     private var bannerHeightConstraint: NSLayoutConstraint?
 
     /// Creates a scene-scoped UITableView conversation controller.
@@ -85,6 +88,12 @@ public final class AgentTableConversationViewController: UIViewController {
             name: UIApplication.willEnterForegroundNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(contentSizeCategoryDidChange),
+            name: UIContentSizeCategory.didChangeNotification,
+            object: nil
+        )
         displayedTurns = presentationTurns
         synchronizeDefaultExpansionState()
         tableView.reloadData()
@@ -99,6 +108,96 @@ public final class AgentTableConversationViewController: UIViewController {
         guard needsInitialScrollToLatest else { return }
         needsInitialScrollToLatest = false
         scrollCoordinator.scrollToLatest()
+    }
+
+    public override func viewWillTransition(
+        to size: CGSize,
+        with coordinator: any UIViewControllerTransitionCoordinator
+    ) {
+        let anchor = beginViewportResize()
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(
+            alongsideTransition: { [weak self] _ in
+                self?.tableView.setNeedsLayout()
+            },
+            completion: { [weak self] _ in
+                self?.endViewportResize(restoring: anchor)
+            }
+        )
+    }
+
+    public override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        rowHeightCache.removeAll()
+        rendererRegistry.removeCachedData()
+    }
+
+    func beginViewportResize() -> AgentLayoutAnchor? {
+        let wasFollowingLatest = scrollCoordinator.isFollowingLatest
+        let anchor = scrollCoordinator.captureAnchor(edge: wasFollowingLatest ? .bottom : .top)
+        pendingViewportResizeAnchor = anchor
+        pendingViewportResizeRestorationAnchor = nil
+        pendingViewportResizeWasFollowingLatest = wasFollowingLatest
+        rowHeightCache.invalidateAppearance()
+        return anchor
+    }
+
+    func endViewportResize(restoring anchor: AgentLayoutAnchor?) {
+        guard let anchor, pendingViewportResizeAnchor == anchor else { return }
+        guard !isPerformingTableUpdate else {
+            pendingViewportResizeRestorationAnchor = anchor
+            return
+        }
+        performViewportResizeRestoration(anchor)
+    }
+
+    private func performViewportResizeRestoration(_ anchor: AgentLayoutAnchor) {
+        guard pendingViewportResizeAnchor == anchor else { return }
+        // Rich Markdown children capture the available content width when they are built.
+        // Recreate only the visible rows after the new bounds have landed so tables,
+        // images, and horizontally scrolling code use the new viewport width.
+        let visibleRows = tableView.indexPathsForVisibleRows ?? []
+        isPerformingTableUpdate = true
+        guard !visibleRows.isEmpty else {
+            finishViewportResizeRestoration(anchor)
+            return
+        }
+        UIView.performWithoutAnimation {
+            tableView.performBatchUpdates {
+                tableView.reloadRows(at: visibleRows, with: .none)
+            } completion: { [weak self] _ in
+                self?.finishViewportResizeRestoration(anchor)
+            }
+        }
+    }
+
+    private func finishViewportResizeRestoration(_ anchor: AgentLayoutAnchor) {
+        guard pendingViewportResizeAnchor == anchor else {
+            completeTableUpdate()
+            return
+        }
+        tableView.layoutIfNeeded()
+        restoreViewportAfterResize(anchor)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard self.pendingViewportResizeAnchor == anchor else {
+                self.completeTableUpdate()
+                return
+            }
+            self.tableView.layoutIfNeeded()
+            self.restoreViewportAfterResize(anchor)
+            self.pendingViewportResizeAnchor = nil
+            self.pendingViewportResizeWasFollowingLatest = false
+            self.completeTableUpdate()
+        }
+    }
+
+    private func restoreViewportAfterResize(_ anchor: AgentLayoutAnchor) {
+        if pendingViewportResizeWasFollowingLatest {
+            scrollCoordinator.scrollToLatest()
+        } else {
+            scrollCoordinator.restore(anchor)
+        }
     }
 
     /// Replaces the current visual theme and reloads visible rows without animation.
@@ -222,6 +321,7 @@ public final class AgentTableConversationViewController: UIViewController {
         jumpConfiguration.imagePadding = 5
         jumpConfiguration.cornerStyle = .capsule
         jumpToLatestButton.configuration = jumpConfiguration
+        jumpToLatestButton.isPointerInteractionEnabled = true
         jumpToLatestButton.translatesAutoresizingMaskIntoConstraints = false
         jumpToLatestButton.isHidden = true
         jumpToLatestButton.accessibilityIdentifier = "AgentConversationJumpToLatestButton"
@@ -526,6 +626,11 @@ public final class AgentTableConversationViewController: UIViewController {
                 apply(pending)
                 return
             }
+            if let anchor = pendingViewportResizeRestorationAnchor {
+                pendingViewportResizeRestorationAnchor = nil
+                performViewportResizeRestoration(anchor)
+                return
+            }
             if let blockID = pendingRowReconfigurationBlockIDs.first {
                 pendingRowReconfigurationBlockIDs.remove(blockID)
                 let animated = pendingAnimatedRowReconfigurationBlockIDs.remove(blockID) != nil
@@ -570,7 +675,7 @@ public final class AgentTableConversationViewController: UIViewController {
             reconfigure(blockID, animated: true)
         case .copy(let blockID):
             if let block = turnAndBlock(for: blockID)?.block {
-                UIPasteboard.general.string = copyText(for: block)
+                UIPasteboard.general.string = AgentBlockCopyText.text(for: block)
             }
         case .openArtifact(let id):
             perform(.host(.openArtifact(id)))
@@ -1015,18 +1120,6 @@ public final class AgentTableConversationViewController: UIViewController {
         resolvingApprovalIDs.formIntersection(unresolved)
     }
 
-    private func copyText(for block: AgentBlock) -> String {
-        switch block.content {
-        case .userText(let value): value.text
-        case .markdown(let value): value.markdown
-        case .command(let value): value.output.text.isEmpty ? value.command : value.output.text
-        case .custom(let value):
-            (try? String(data: JSONEncoder().encode(value.payload), encoding: .utf8))
-                ?? value.fallbackTitle
-        default: String(describing: block.content)
-        }
-    }
-
     @objc private func sendFromKeyboard() { composer.submitCurrentInput() }
     @objc private func focusComposer() { composer.focus() }
 
@@ -1037,6 +1130,12 @@ public final class AgentTableConversationViewController: UIViewController {
 
     @objc private func applicationDidEnterBackground() { updateScheduler.setActive(false) }
     @objc private func applicationWillEnterForeground() { updateScheduler.setActive(true) }
+
+    @objc private func contentSizeCategoryDidChange() {
+        guard isViewLoaded, view.window != nil else { return }
+        let anchor = beginViewportResize()
+        endViewportResize(restoring: anchor)
+    }
 }
 
 extension AgentTableConversationViewController: UITableViewDataSource, UITableViewDelegate {
@@ -1083,6 +1182,25 @@ extension AgentTableConversationViewController: UITableViewDataSource, UITableVi
             }
         }
         return cell
+    }
+
+    public func tableView(
+        _ tableView: UITableView,
+        contextMenuConfigurationForRowAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard !isMetadataRow(at: indexPath),
+            let (turn, block) = displayedTurnAndBlock(at: indexPath)
+        else { return nil }
+        return UIContextMenuConfiguration(
+            identifier: block.id.rawValue as NSString,
+            previewProvider: nil
+        ) { [weak self] _ in
+            guard let self else { return nil }
+            return AgentBlockContextMenu.make(
+                for: self.makeRenderContext(turn: turn, block: block)
+            )
+        }
     }
 
     public func tableView(

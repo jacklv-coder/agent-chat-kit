@@ -4,9 +4,9 @@ Ship a complete message-list page while keeping runtime and product policy in th
 
 ## Use the page, not individual cells
 
-``AgentConversationViewController`` composes the native collection timeline, connection banner,
-Jump to Latest control, history progress, keyboard-safe composer, and renderer registry. A host
-usually presents one controller for the selected conversation:
+``AgentTableConversationViewController`` is the recommended page. It composes the native table
+timeline, connection banner, Jump to Latest control, history progress, keyboard-safe composer, and
+renderer registry. A host usually presents one controller for the selected conversation:
 
 ```swift
 let store = AgentConversationStore(
@@ -17,7 +17,7 @@ let session = AgentChatSession(
     configuration: .init(conversationID: selectedConversationID),
     store: store
 )
-let page = AgentConversationViewController(
+let page = AgentTableConversationViewController(
     store: store,
     configuration: .init(
         runtimeCapabilities: runtimeCapabilities,
@@ -35,10 +35,9 @@ page.actionHandler = { action in
 Task { try await session.start() }
 ```
 
-``AgentTableConversationViewController`` provides the same Store, Composer, action routing, cells,
-history paging, and scroll policy on a traditional `UITableView`. Replace the controller type in the
-example above when the host prefers section/row updates and automatic row heights; keep the collection
-implementation when custom compositional layouts are required.
+``AgentConversationViewController`` provides the same Store, Composer, action routing, cells,
+history paging, and scroll policy on a native collection view. Replace the controller type in the
+example above only when the host requires a custom compositional layout.
 
 The table timeline keeps one Turn per section for stable data updates, but does not render section
 headers. A dedicated metadata cell follows the Turn's final block: its time trails below user bubbles
@@ -55,7 +54,7 @@ Choose the compact inline treatment or an expandable capsule when constructing e
 controller:
 
 ```swift
-let page = AgentConversationViewController(
+let page = AgentTableConversationViewController(
     store: store,
     configuration: .init(toolPresentationStyle: .capsule)
 )
@@ -65,6 +64,11 @@ Both styles consume the same ``AgentBlock`` lifecycle. Emit `.queued`, `.running
 `.waitingForApproval`, `.succeeded`, `.failed`, or `.cancelled` as the runtime changes state, and
 increment the block revision for every replacement. Capsule headers add progress, completion, failure,
 retry, and disclosure affordances without changing the runtime protocol.
+
+Long-press or secondary-click a block to use its context menu. Built-in menus expose the actions that
+are valid for that payload and lifecycle: copy, expand/collapse, open file or artifact, retry, and
+approval choices. Pointer highlighting is automatic on iPad, while file/image/text/URL drops in the
+composer are forwarded to the host's existing paste/import callback.
 
 Command, search, file, image, and generic tool blocks derive a safe title and subtitle from their
 typed payload. An adapter can override those labels without creating a custom renderer by adding
@@ -115,7 +119,15 @@ gate.
 
 Do not reach into the collection view to manage offsets from the host. The controller preserves a
 stable block identifier and viewport-relative offset when older turns are prepended, and falls back to
-a nearby surviving block if the original anchor is deleted.
+a nearby surviving block if the original anchor is deleted. Both production controllers capture the
+same semantic anchor during rotation or Stage Manager resize, invalidate width-sensitive layout, and
+restore after the final layout pass.
+
+Raw unified diffs without pre-parsed files are parsed by the Markdown module's actor and cached by
+block ID plus revision. The timeline renders the bounded summary; Open Full Diff and Open Full Output
+remain host actions, so the SDK never retains or presents unbounded content in the main list.
+Fenced-code previews likewise render at most 32,000 characters and 500 lines in the timeline, label
+the truncated state, and keep Copy wired to the complete source value.
 
 ## Return cursor-addressed history
 

@@ -79,7 +79,7 @@ let package = Package(
         ),
         .testTarget(
             name: "AgentChatPerformanceTests",
-            dependencies: ["AgentChatCore", "AgentChatMarkdown"]
+            dependencies: ["AgentChatCore", "AgentChatMarkdown", "AgentChatUIKit"]
         ),
     ],
     swiftLanguageModes: [.v6]

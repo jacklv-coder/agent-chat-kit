@@ -9,17 +9,21 @@ AgentConversationReducer actor
         ↓ AgentReductionResult
 AgentConversationStore @MainActor
         ↓ stable-ID presentation patches
-AgentConversationViewController
+AgentTableConversationViewController (recommended)
+or AgentConversationViewController
 ```
 
 `AgentChatCore` owns immutable state and deterministic reduction. It imports Foundation only and
 does not know UIKit, transport, models, tools, or persistence. `AgentChatMarkdown` converts parser
-ASTs into a package-owned Sendable render document. `AgentChatUIKit` maps one turn to one collection
-section and one block to one item. Renderers emit actions; they never invoke a runtime connection.
+ASTs into a package-owned Sendable render document. `AgentChatUIKit` maps one turn to one table or
+collection section and one block to one row or item. Renderers emit actions; they never invoke a
+runtime connection.
 
-The timeline uses a native single-column `UICollectionViewCompositionalLayout`. A package-owned
-scroll controller anchors by block ID and relative offset across history prepends, streaming height
-changes, keyboard changes, and size transitions. No third-party layout type is exposed or required.
+The recommended timeline uses a native `UITableView`; a single-column
+`UICollectionViewCompositionalLayout` implementation remains available for hosts that need custom
+collection layouts. Package-owned scroll controllers anchor by block ID and relative offset across
+history prepends, streaming height changes, keyboard changes, and size transitions. No third-party
+layout type is exposed or required.
 
 Presentation patches are classified internally:
 

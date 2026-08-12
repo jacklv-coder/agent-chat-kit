@@ -83,6 +83,122 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertEqual(action, .selectAccessory("model"))
     }
 
+    func testComposerRoutesDroppedFilesImagesTextAndURLsToHost() {
+        let composer = AgentComposerView()
+        let providers = [
+            NSItemProvider(
+                item: NSURL(string: "file:///tmp/sample.pdf"), typeIdentifier: "public.file-url"),
+            NSItemProvider(object: UIImage()),
+            NSItemProvider(object: "Dropped text" as NSString),
+            NSItemProvider(object: NSURL(string: "https://example.com")!),
+        ]
+        var imported: [NSItemProvider] = []
+        composer.importHandler = { providers, _ in imported = providers }
+
+        XCTAssertTrue(composer.handleDroppedItemProviders(providers))
+        XCTAssertEqual(imported.count, providers.count)
+        XCTAssertTrue(composer.interactions.contains { $0 is UIDropInteraction })
+    }
+
+    func testComposerPlaceholderStaysInsideTextViewInRTL() throws {
+        let composer = AgentComposerView()
+        composer.semanticContentAttribute = .forceRightToLeft
+        composer.frame = .init(x: 0, y: 0, width: 390, height: 180)
+        composer.layoutIfNeeded()
+        let textView = try XCTUnwrap(
+            composer.allSubviews.compactMap { $0 as? UITextView }.first
+        )
+        let placeholder = try XCTUnwrap(
+            textView.allSubviews.compactMap { $0 as? UILabel }.first
+        )
+
+        XCTAssertGreaterThanOrEqual(placeholder.frame.minX, 0)
+        XCTAssertLessThanOrEqual(placeholder.frame.maxX, textView.bounds.maxX)
+    }
+
+    func testBlockContextMenuExposesCopyExpandOpenRetryAndApprovalChoices() throws {
+        let failedFile = AgentBlock(
+            id: "menu-file",
+            kind: .fileOperation,
+            content: .fileOperation(.init(operation: .read, path: "Sources/App.swift")),
+            state: .failed(.init(code: "read.failed", message: "Failed", isRetryable: true)),
+            createdAt: .distantPast
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [failedFile],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let fileMenu = AgentBlockContextMenu.make(
+            for: renderContext(turn: turn, block: failedFile, canRetry: true)
+        )
+        let identifiers = Set(
+            fileMenu.children.compactMap { ($0 as? UIAction)?.identifier.rawValue }
+        )
+        XCTAssertTrue(identifiers.contains("agentchat.copy"))
+        XCTAssertTrue(identifiers.contains("agentchat.expand"))
+        XCTAssertTrue(identifiers.contains("agentchat.open-file"))
+        XCTAssertTrue(identifiers.contains("agentchat.retry"))
+
+        let approval = AgentBlock(
+            id: "menu-approval",
+            kind: .approval,
+            content: .approval(
+                .init(
+                    approvalID: "approval",
+                    title: "Allow edit?",
+                    risk: .medium,
+                    choices: [
+                        .init(id: "approve", title: "Allow", role: .approve),
+                        .init(id: "reject", title: "Reject", role: .reject),
+                    ]
+                )
+            ),
+            state: .waitingForApproval,
+            createdAt: .distantPast
+        )
+        let approvalMenu = AgentBlockContextMenu.make(
+            for: renderContext(turn: turn, block: approval)
+        )
+        let choiceMenu = try XCTUnwrap(
+            approvalMenu.children.compactMap { $0 as? UIMenu }.first
+        )
+        XCTAssertEqual(choiceMenu.children.count, 2)
+    }
+
+    func testToolCopyTextUsesStableRawJSON() throws {
+        let block = AgentBlock(
+            id: "copy-tool",
+            kind: .tool,
+            content: .tool(
+                .init(
+                    toolName: "repository.inspect",
+                    title: "Inspect repository",
+                    summary: "Completed",
+                    input: .object(["path": .string("Sources")]),
+                    output: .object(["matchCount": .number(3)])
+                )
+            ),
+            state: .succeeded,
+            createdAt: .distantPast
+        )
+
+        let text = AgentBlockCopyText.text(for: block)
+        let data = try XCTUnwrap(text.data(using: .utf8))
+        let object = try XCTUnwrap(
+            JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        let input = try XCTUnwrap(object["input"] as? [String: Any])
+        let output = try XCTUnwrap(object["output"] as? [String: Any])
+
+        XCTAssertEqual(object["toolName"] as? String, "repository.inspect")
+        XCTAssertEqual(input["path"] as? String, "Sources")
+        XCTAssertEqual(output["matchCount"] as? Double, 3)
+        XCTAssertFalse(text.contains("AgentBlockContent"))
+    }
+
     func testComposerDoesNotRebuildControlsForIdenticalRuntimeState() throws {
         let composer = AgentComposerView()
         let state = AgentComposerState(
@@ -659,6 +775,11 @@ final class AgentTimelineTests: XCTestCase {
                 patches: [.insertTurn(insertedTurn.id, index: 1)]
             )
         )
+        let resizeAnchor = try XCTUnwrap(controller.beginViewportResize())
+        window.frame.size.width = 430
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+        controller.endViewportResize(restoring: resizeAnchor)
 
         try await Task.sleep(for: .milliseconds(250))
         controller.view.layoutIfNeeded()
@@ -1345,6 +1466,11 @@ final class AgentTimelineTests: XCTestCase {
         store.apply(
             .init(snapshot: updated, patches: [.insertTurn(insertedTurn.id, index: 1)])
         )
+        let resizeAnchor = try XCTUnwrap(controller.beginViewportResize())
+        window.frame.size.width = 430
+        controller.view.frame = window.bounds
+        controller.view.layoutIfNeeded()
+        controller.endViewportResize(restoring: resizeAnchor)
 
         try await Task.sleep(for: .milliseconds(700))
         controller.view.layoutIfNeeded()
@@ -1437,6 +1563,408 @@ final class AgentTimelineTests: XCTestCase {
 
         XCTAssertEqual(tableView.numberOfSections, initialTurns.count + older.count)
         XCTAssertEqual(restoredOffset, originalOffset, accuracy: 1)
+    }
+
+    func testTableControllerPreservesSemanticAnchorAcrossIPadResize() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        func turn(_ index: Int) -> AgentTurn {
+            let content: AgentBlockContent =
+                index.isMultiple(of: 2)
+                ? .markdown(
+                    .init(
+                        markdown: """
+                            ## Resize item \(index)
+
+                            \(String(repeating: "Width-sensitive Markdown content. ", count: index % 5 + 2))
+
+                            | Width | Anchor |
+                            | --- | --- |
+                            | Adaptive | Stable |
+                            """,
+                        isFinal: true
+                    )
+                )
+                : .tool(
+                    .init(
+                        toolName: "resize.inspect",
+                        title: "Inspect width \(index)",
+                        summary: "Expanded tool content reflows with the viewport.",
+                        input: .object(["index": .number(Double(index))]),
+                        output: .object(["stable": .bool(true)]),
+                        displayMode: .expanded
+                    )
+                )
+            return AgentTurn(
+                id: .init(rawValue: "resize-turn-\(index)"),
+                role: .assistant,
+                blocks: [
+                    AgentBlock(
+                        id: .init(rawValue: "resize-block-\(index)"),
+                        kind: content.blockKind,
+                        content: content,
+                        state: .succeeded,
+                        createdAt: date
+                    )
+                ],
+                state: .completed,
+                createdAt: date
+            )
+        }
+        let turns = (0..<60).map(turn)
+        let store = AgentConversationStore(
+            snapshot: .init(id: "resize-conversation", turns: turns)
+        )
+        let controller = AgentTableConversationViewController(
+            store: store,
+            configuration: .init(toolPresentationStyle: .capsule)
+        )
+        let window = UIWindow(frame: .init(x: 0, y: 0, width: 1_024, height: 768))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        tableView.scrollToRow(at: .init(row: 0, section: 30), at: .top, animated: false)
+        tableView.layoutIfNeeded()
+        controller.scrollViewWillBeginDragging(tableView)
+        controller.scrollViewDidEndDragging(tableView, willDecelerate: false)
+        try await Task.sleep(for: .milliseconds(150))
+
+        var expectedAnchor = try XCTUnwrap(controller.beginViewportResize())
+        XCTAssertEqual(expectedAnchor.edge, .top)
+        for width: CGFloat in [760, 920, 620, 1_024] {
+            window.frame.size.width = width
+            controller.view.frame = window.bounds
+            controller.view.setNeedsLayout()
+            controller.view.layoutIfNeeded()
+            controller.endViewportResize(restoring: expectedAnchor)
+            try await Task.sleep(for: .milliseconds(100))
+
+            let restored = try XCTUnwrap(controller.beginViewportResize())
+            XCTAssertEqual(restored.blockID, expectedAnchor.blockID)
+            XCTAssertEqual(restored.viewportOffset, expectedAnchor.viewportOffset, accuracy: 4)
+            expectedAnchor = restored
+        }
+    }
+
+    func testTableControllerReconfiguresVisibleMarkdownAfterViewportResize() async throws {
+        let block = AgentBlock(
+            id: "table-resize-markdown",
+            kind: .markdown,
+            content: .markdown(
+                .init(
+                    markdown: """
+                        | Width | Content |
+                        | --- | --- |
+                        | Adaptive | Reconfigured after resize |
+                        """,
+                    isFinal: true
+                )
+            ),
+            state: .succeeded,
+            createdAt: .distantPast
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(
+                id: "table-resize-conversation",
+                turns: [
+                    .init(
+                        id: "turn",
+                        role: .assistant,
+                        blocks: [block],
+                        state: .completed,
+                        createdAt: .distantPast
+                    )
+                ]
+            )
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: .init(x: 0, y: 0, width: 1_024, height: 768))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        let path = IndexPath(row: 0, section: 0)
+        let cell = try XCTUnwrap(tableView.cellForRow(at: path) as? AgentTableBlockCell)
+        await cell.waitForPendingRendering()
+        tableView.layoutIfNeeded()
+        let previousMarkdownTable = try XCTUnwrap(
+            cell.contentView.allSubviews.first { $0 is AgentMarkdownTableView }
+        )
+        let anchor = try XCTUnwrap(controller.beginViewportResize())
+        XCTAssertEqual(anchor.edge, .bottom)
+
+        window.frame.size.width = 620
+        controller.view.frame = window.bounds
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        controller.endViewportResize(restoring: anchor)
+        try await Task.sleep(for: .milliseconds(100))
+
+        let resizedCell = try XCTUnwrap(
+            tableView.cellForRow(at: path) as? AgentTableBlockCell
+        )
+        await resizedCell.waitForPendingRendering()
+        let resizedMarkdownTable = try XCTUnwrap(
+            resizedCell.contentView.allSubviews.first { $0 is AgentMarkdownTableView }
+        )
+        XCTAssertFalse(previousMarkdownTable === resizedMarkdownTable)
+        let followingAnchor = try XCTUnwrap(controller.beginViewportResize())
+        XCTAssertEqual(followingAnchor.edge, .bottom)
+        controller.endViewportResize(restoring: followingAnchor)
+    }
+
+    func testCollectionControllerReconfiguresVisibleMarkdownAfterViewportResize() async throws {
+        let block = AgentBlock(
+            id: "collection-resize-markdown",
+            kind: .markdown,
+            content: .markdown(
+                .init(
+                    markdown: """
+                        | Width | Content |
+                        | --- | --- |
+                        | Adaptive | Reconfigured after resize |
+                        """,
+                    isFinal: true
+                )
+            ),
+            state: .succeeded,
+            createdAt: .distantPast
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(
+                id: "collection-resize-conversation",
+                turns: [
+                    .init(
+                        id: "turn",
+                        role: .assistant,
+                        blocks: [block],
+                        state: .completed,
+                        createdAt: .distantPast
+                    )
+                ]
+            )
+        )
+        let controller = AgentConversationViewController(store: store)
+        let window = UIWindow(frame: .init(x: 0, y: 0, width: 1_024, height: 768))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let collectionView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UICollectionView }.first
+        )
+        let path = IndexPath(item: 0, section: 0)
+        let cell = try XCTUnwrap(collectionView.cellForItem(at: path) as? AgentBlockCell)
+        await cell.waitForPendingRendering()
+        collectionView.layoutIfNeeded()
+        let previousMarkdownTable = try XCTUnwrap(
+            cell.contentView.allSubviews.first { $0 is AgentMarkdownTableView }
+        )
+        let anchor = try XCTUnwrap(controller.beginViewportResize())
+        XCTAssertEqual(anchor.edge, .bottom)
+
+        window.frame.size.width = 620
+        controller.view.frame = window.bounds
+        controller.view.setNeedsLayout()
+        controller.view.layoutIfNeeded()
+        controller.endViewportResize(restoring: anchor)
+        try await Task.sleep(for: .milliseconds(100))
+
+        let resizedCell = try XCTUnwrap(
+            collectionView.cellForItem(at: path) as? AgentBlockCell
+        )
+        await resizedCell.waitForPendingRendering()
+        let resizedMarkdownTable = try XCTUnwrap(
+            resizedCell.contentView.allSubviews.first { $0 is AgentMarkdownTableView }
+        )
+        XCTAssertFalse(previousMarkdownTable === resizedMarkdownTable)
+        let followingAnchor = try XCTUnwrap(controller.beginViewportResize())
+        XCTAssertEqual(followingAnchor.edge, .bottom)
+        controller.endViewportResize(restoring: followingAnchor)
+    }
+
+    func testTableControllerRebuildsRichMarkdownForDynamicTypeChange() async throws {
+        let store = dynamicTypeMarkdownStore(id: "table-dynamic-type")
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: .init(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        let path = IndexPath(row: 0, section: 0)
+        let originalCell = try XCTUnwrap(tableView.cellForRow(at: path) as? AgentTableBlockCell)
+        await originalCell.waitForPendingRendering()
+        let originalMarkdown = try XCTUnwrap(
+            originalCell.contentView.allSubviews.compactMap { $0 as? AgentMarkdownContentView }
+                .first
+        )
+        let originalHeadingFont = try headingFont(in: originalMarkdown)
+        let originalCodeFont = try codeFont(in: originalMarkdown)
+
+        controller.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
+        NotificationCenter.default.post(
+            name: UIContentSizeCategory.didChangeNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(150))
+
+        let updatedCell = try XCTUnwrap(tableView.cellForRow(at: path) as? AgentTableBlockCell)
+        await updatedCell.waitForPendingRendering()
+        let updatedMarkdown = try XCTUnwrap(
+            updatedCell.contentView.allSubviews.compactMap { $0 as? AgentMarkdownContentView }.first
+        )
+        XCTAssertFalse(originalMarkdown === updatedMarkdown)
+        XCTAssertGreaterThan(
+            try headingFont(in: updatedMarkdown).pointSize, originalHeadingFont.pointSize)
+        XCTAssertGreaterThan(
+            try codeFont(in: updatedMarkdown).pointSize, originalCodeFont.pointSize)
+    }
+
+    func testCollectionControllerRebuildsRichMarkdownForDynamicTypeChange() async throws {
+        let store = dynamicTypeMarkdownStore(id: "collection-dynamic-type")
+        let controller = AgentConversationViewController(store: store)
+        let window = UIWindow(frame: .init(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let collectionView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UICollectionView }.first
+        )
+        let path = IndexPath(item: 0, section: 0)
+        let originalCell = try XCTUnwrap(collectionView.cellForItem(at: path) as? AgentBlockCell)
+        await originalCell.waitForPendingRendering()
+        let originalMarkdown = try XCTUnwrap(
+            originalCell.contentView.allSubviews.compactMap { $0 as? AgentMarkdownContentView }
+                .first
+        )
+        let originalHeadingFont = try headingFont(in: originalMarkdown)
+
+        controller.traitOverrides.preferredContentSizeCategory = .accessibilityExtraExtraExtraLarge
+        NotificationCenter.default.post(
+            name: UIContentSizeCategory.didChangeNotification, object: nil)
+        try await Task.sleep(for: .milliseconds(150))
+
+        let updatedCell = try XCTUnwrap(collectionView.cellForItem(at: path) as? AgentBlockCell)
+        await updatedCell.waitForPendingRendering()
+        let updatedMarkdown = try XCTUnwrap(
+            updatedCell.contentView.allSubviews.compactMap { $0 as? AgentMarkdownContentView }.first
+        )
+        XCTAssertFalse(originalMarkdown === updatedMarkdown)
+        XCTAssertGreaterThan(
+            try headingFont(in: updatedMarkdown).pointSize, originalHeadingFont.pointSize)
+    }
+
+    func testTableControllerPreservesAnchorAcrossTwentyMixedHeightHistoryPages() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        func turn(prefix: String, index: Int) -> AgentTurn {
+            let content: AgentBlockContent
+            switch index % 3 {
+            case 0:
+                content = .markdown(
+                    .init(
+                        markdown: """
+                            **History \(index)**
+
+                            \(String(repeating: "A mixed-height Markdown line.\n", count: index % 5 + 1))
+                            """,
+                        isFinal: true
+                    )
+                )
+            case 1:
+                content = .tool(
+                    .init(
+                        toolName: "history.inspect",
+                        title: "History tool \(index)",
+                        summary: "Expanded detail for history page insertion.",
+                        input: .object(["pageItem": .number(Double(index))]),
+                        output: .object(["loaded": .bool(true)]),
+                        displayMode: .expanded
+                    )
+                )
+            default:
+                content = .activity(
+                    .init(title: "History activity \(index)", detail: "Stable identifier")
+                )
+            }
+            return AgentTurn(
+                id: .init(rawValue: "\(prefix)-turn-\(index)"),
+                role: .assistant,
+                blocks: [
+                    AgentBlock(
+                        id: .init(rawValue: "\(prefix)-block-\(index)"),
+                        kind: content.blockKind,
+                        content: content,
+                        state: .succeeded,
+                        createdAt: date
+                    )
+                ],
+                state: .completed,
+                createdAt: date
+            )
+        }
+        let current = (0..<80).map { turn(prefix: "current", index: $0) }
+        let store = AgentConversationStore(
+            snapshot: .init(
+                id: "twenty-page-history",
+                turns: current,
+                earlierHistoryCursor: "page-20",
+                hasEarlierHistory: true
+            )
+        )
+        let controller = AgentTableConversationViewController(
+            store: store,
+            configuration: .init(toolPresentationStyle: .capsule)
+        )
+        let window = UIWindow(frame: .init(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        tableView.scrollToRow(at: .init(row: 0, section: 25), at: .top, animated: false)
+        tableView.layoutIfNeeded()
+        let anchoredBlockID = current[25].blocks[0].id
+        let originalOffset =
+            tableView.rectForRow(at: .init(row: 0, section: 25)).minY
+            - tableView.contentOffset.y
+            - tableView.adjustedContentInset.top
+
+        var updated = store.snapshot
+        for page in 0..<20 {
+            let pageTurns = (0..<50).map {
+                turn(prefix: "page-\(page)", index: page * 50 + $0)
+            }
+            updated.turns.insert(contentsOf: pageTurns, at: 0)
+            updated.earlierHistoryCursor =
+                page == 19 ? nil : AgentHistoryCursor(rawValue: "page-\(19 - page)")
+            updated.hasEarlierHistory = page < 19
+            store.apply(
+                .init(
+                    snapshot: updated,
+                    patches: [
+                        .prependTurns(pageTurns.map(\.id)),
+                        .historyStateChanged,
+                    ]
+                )
+            )
+            try await Task.sleep(for: .milliseconds(90))
+        }
+        try await Task.sleep(for: .milliseconds(200))
+        tableView.layoutIfNeeded()
+        let section = try XCTUnwrap(
+            updated.turns.firstIndex { $0.blocks.contains { $0.id == anchoredBlockID } }
+        )
+        let restoredOffset =
+            tableView.rectForRow(at: .init(row: 0, section: section)).minY
+            - tableView.contentOffset.y
+            - tableView.adjustedContentInset.top
+
+        XCTAssertEqual(tableView.numberOfSections, 1_080)
+        XCTAssertEqual(restoredOffset, originalOffset, accuracy: 2)
     }
 
     func testControllerDefensivelyFiltersDuplicateStableIdentifiers() {
@@ -1922,6 +2450,677 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertGreaterThan(table?.intrinsicContentSize.height ?? 0, 44)
     }
 
+    func testMarkdownTablePreservesInlineStylesLinksAndImagePreviews() async throws {
+        let image = UIGraphicsImageRenderer(size: .init(width: 24, height: 16)).image { context in
+            UIColor.systemOrange.setFill()
+            context.fill(.init(x: 0, y: 0, width: 24, height: 16))
+        }
+        let block = AgentBlock(
+            id: "rich-markdown-table",
+            kind: .markdown,
+            content: .markdown(
+                .init(
+                    markdown: """
+                        | Content |
+                        | --- |
+                        | **Styled** [Link](https://example.com/table) ![Thumb](table-preview) |
+                        """,
+                    isFinal: true
+                )
+            ),
+            state: .succeeded,
+            createdAt: .distantPast
+        )
+        let turn = AgentTurn(
+            id: "rich-markdown-table-turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.markdown])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 320, height: 480),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        var receivedActions: [AgentBlockUIAction] = []
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(
+                turn: turn,
+                block: block,
+                imageProvider: StubImageProvider(result: image),
+                actionSink: .init { receivedActions.append($0) }
+            )
+        )
+
+        await (cell as? AgentBlockCell)?.waitForPendingRendering()
+        let table = try XCTUnwrap(
+            cell.contentView.allSubviews.compactMap { $0 as? AgentMarkdownTableView }.first
+        )
+        let markdownImage = try XCTUnwrap(
+            table.allSubviews.compactMap { $0 as? AgentMarkdownImageView }.first
+        )
+        await markdownImage.waitForLoad()
+        let richText = try XCTUnwrap(
+            table.allSubviews.compactMap { $0 as? AgentSelectableTextView }.first { textView in
+                textView.attributedText.string.contains("Styled")
+            }
+        )
+        let source = richText.attributedText.string as NSString
+        let styledRange = source.range(of: "Styled")
+        let linkRange = source.range(of: "Link")
+        let styledFont = try XCTUnwrap(
+            richText.attributedText.attribute(
+                .font,
+                at: styledRange.location,
+                effectiveRange: nil
+            ) as? UIFont
+        )
+        let link =
+            richText.attributedText.attribute(
+                .link,
+                at: linkRange.location,
+                effectiveRange: nil
+            ) as? URL
+
+        XCTAssertTrue(styledFont.fontDescriptor.symbolicTraits.contains(.traitBold))
+        XCTAssertEqual(link, URL(string: "https://example.com/table"))
+        richText.onOpenURL?(try XCTUnwrap(link))
+        let preview = try XCTUnwrap(
+            markdownImage.allSubviews.compactMap { $0 as? AgentInlineImagePreviewView }.first
+        )
+        XCTAssertTrue(preview.accessibilityActivate())
+        XCTAssertTrue(receivedActions.contains(.openLink(try XCTUnwrap(link))))
+        XCTAssertTrue(
+            receivedActions.contains(
+                .previewImage(
+                    reference: .localIdentifier("table-preview"),
+                    alternativeText: "Thumb"
+                )
+            )
+        )
+        XCTAssertGreaterThan(table.intrinsicContentSize.height, 160)
+    }
+
+    func testMarkdownUsesSelectableAttributedInlineStyles() async throws {
+        let block = AgentBlock(
+            id: "markdown-inline-styles",
+            kind: .markdown,
+            content: .markdown(
+                .init(
+                    markdown:
+                        "Plain **strong** *emphasis* ~~removed~~ `code` [link](https://example.com).",
+                    isFinal: true
+                )
+            ),
+            state: .succeeded,
+            createdAt: .distantPast
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.markdown])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 320, height: 480),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(turn: turn, block: block)
+        )
+
+        await (cell as? AgentBlockCell)?.waitForPendingRendering()
+
+        let textView = try XCTUnwrap(
+            cell.contentView.allSubviews.compactMap { $0 as? AgentSelectableTextView }.first
+        )
+        let attributed = try XCTUnwrap(textView.attributedText)
+        let source = attributed.string as NSString
+        let strongRange = source.range(of: "strong")
+        let emphasisRange = source.range(of: "emphasis")
+        let removedRange = source.range(of: "removed")
+        let codeRange = source.range(of: "code")
+        let linkRange = source.range(of: "link")
+        let strongFont =
+            attributed.attribute(.font, at: strongRange.location, effectiveRange: nil)
+            as? UIFont
+        let emphasisFont =
+            attributed.attribute(
+                .font,
+                at: emphasisRange.location,
+                effectiveRange: nil
+            ) as? UIFont
+
+        XCTAssertTrue(textView.isSelectable)
+        XCTAssertTrue(strongFont?.fontDescriptor.symbolicTraits.contains(.traitBold) == true)
+        XCTAssertTrue(emphasisFont?.fontDescriptor.symbolicTraits.contains(.traitItalic) == true)
+        XCTAssertNotNil(
+            attributed.attribute(
+                .strikethroughStyle,
+                at: removedRange.location,
+                effectiveRange: nil
+            )
+        )
+        XCTAssertNotNil(
+            attributed.attribute(.backgroundColor, at: codeRange.location, effectiveRange: nil)
+        )
+        XCTAssertEqual(
+            attributed.attribute(.link, at: linkRange.location, effectiveRange: nil) as? URL,
+            URL(string: "https://example.com")
+        )
+    }
+
+    func testMarkdownCodeBlockScrollsCopiesAndExpands() async throws {
+        let lines = (1...24).map { index in
+            "let generatedValue\(index) = \(index) // a deliberately wide source line for horizontal scrolling"
+        }.joined(separator: "\n")
+        let block = AgentBlock(
+            id: "markdown-code",
+            kind: .markdown,
+            content: .markdown(.init(markdown: "```swift\n\(lines)\n```", isFinal: true)),
+            state: .succeeded,
+            createdAt: .distantPast
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.markdown])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 320, height: 480),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(turn: turn, block: block)
+        )
+
+        await (cell as? AgentBlockCell)?.waitForPendingRendering()
+
+        let codeBlock = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentMarkdownCodeBlock"
+            } as? AgentMarkdownCodeBlockView
+        )
+        let scrollView = try XCTUnwrap(
+            codeBlock.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentMarkdownCodeScrollView"
+            } as? UIScrollView
+        )
+        let copyButton = try XCTUnwrap(
+            codeBlock.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentMarkdownCodeCopyButton"
+            } as? UIButton
+        )
+        let disclosure = try XCTUnwrap(
+            codeBlock.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentMarkdownCodeDisclosureButton"
+            } as? UIButton
+        )
+        let collapsedHeight = codeBlock.systemLayoutSizeFitting(
+            .init(width: 320, height: UIView.layoutFittingCompressedSize.height)
+        ).height
+        codeBlock.frame = .init(x: 0, y: 0, width: 320, height: collapsedHeight)
+        codeBlock.layoutIfNeeded()
+        scrollView.layoutIfNeeded()
+
+        var copiedCode: String?
+        codeBlock.copyHandler = { copiedCode = $0 }
+        copyButton.sendActions(for: .touchUpInside)
+        disclosure.sendActions(for: .touchUpInside)
+        let expandedHeight = codeBlock.systemLayoutSizeFitting(
+            .init(width: 320, height: UIView.layoutFittingCompressedSize.height)
+        ).height
+
+        XCTAssertEqual(copiedCode?.trimmingCharacters(in: .newlines), lines)
+        XCTAssertGreaterThan(scrollView.contentSize.width, 320)
+        XCTAssertGreaterThan(expandedHeight, collapsedHeight)
+        XCTAssertEqual(disclosure.configuration?.title, AgentStrings.showLess)
+    }
+
+    func testMarkdownCodeBlockBoundsRenderedTextAndWidthMeasurement() throws {
+        let code = String(repeating: "W", count: 100_000)
+        let codeBlock = AgentMarkdownCodeBlockView(
+            language: "text",
+            code: code,
+            availableWidth: 320,
+            pointSize: 13,
+            contentSizeCategory: .large,
+            textColor: .label,
+            secondaryColor: .secondaryLabel,
+            accentColor: .systemBlue
+        )
+        let fittingHeight = codeBlock.systemLayoutSizeFitting(
+            .init(width: 320, height: UIView.layoutFittingCompressedSize.height)
+        ).height
+        codeBlock.frame = .init(x: 0, y: 0, width: 320, height: fittingHeight)
+        codeBlock.layoutIfNeeded()
+        let codeView = try XCTUnwrap(
+            codeBlock.allSubviews.compactMap { $0 as? AgentSelectableTextView }.first
+        )
+        let scrollView = try XCTUnwrap(
+            codeBlock.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentMarkdownCodeScrollView"
+            } as? UIScrollView
+        )
+        scrollView.layoutIfNeeded()
+
+        XCTAssertLessThan(codeView.text.count, code.count)
+        XCTAssertLessThanOrEqual(
+            codeView.text.count,
+            AgentMarkdownCodeBlockView.maximumRenderedCharacterCount + 2
+        )
+        XCTAssertLessThanOrEqual(
+            codeView.bounds.width, AgentMarkdownCodeBlockView.maximumContentWidth)
+        XCTAssertTrue(
+            codeBlock.allSubviews.compactMap { ($0 as? UILabel)?.text }
+                .contains { $0.contains(AgentStrings.codeTruncated) }
+        )
+    }
+
+    func testMarkdownCodeBlockCountsWrappedVisualLinesForDisclosureAndHeight() throws {
+        let code = String(repeating: "wrapped token ", count: 2_000)
+        let codeBlock = AgentMarkdownCodeBlockView(
+            language: "text",
+            code: code,
+            availableWidth: 320,
+            pointSize: 13,
+            contentSizeCategory: .large,
+            textColor: .label,
+            secondaryColor: .secondaryLabel,
+            accentColor: .systemBlue
+        )
+        let disclosure = try XCTUnwrap(
+            codeBlock.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentMarkdownCodeDisclosureButton"
+            } as? UIButton
+        )
+        let collapsedHeight = codeBlock.systemLayoutSizeFitting(
+            .init(width: 320, height: UIView.layoutFittingCompressedSize.height)
+        ).height
+
+        XCTAssertFalse(disclosure.isHidden)
+        disclosure.sendActions(for: .touchUpInside)
+
+        let expandedHeight = codeBlock.systemLayoutSizeFitting(
+            .init(width: 320, height: UIView.layoutFittingCompressedSize.height)
+        ).height
+        XCTAssertGreaterThan(expandedHeight, collapsedHeight)
+    }
+
+    func testTableRichInlineMarkdownUsesAutomaticRowHeight() async throws {
+        let block = AgentBlock(
+            id: "table-rich-inline-markdown",
+            kind: .markdown,
+            content: .markdown(
+                .init(
+                    markdown: String(
+                        repeating: "**Bold content near a wrapping boundary** ", count: 8),
+                    isFinal: true
+                )
+            ),
+            state: .succeeded,
+            createdAt: .distantPast
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(
+                id: "table-rich-inline-conversation",
+                turns: [
+                    .init(
+                        id: "turn",
+                        role: .assistant,
+                        blocks: [block],
+                        state: .completed,
+                        createdAt: .distantPast
+                    )
+                ]
+            )
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: .init(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        let path = IndexPath(row: 0, section: 0)
+        let cell = try XCTUnwrap(tableView.cellForRow(at: path) as? AgentTableBlockCell)
+        await cell.waitForPendingRendering()
+
+        XCTAssertEqual(
+            controller.tableView(tableView, heightForRowAt: path),
+            UITableView.automaticDimension
+        )
+    }
+
+    func testTableMarkdownCodeDisclosureUpdatesAutomaticRowHeight() async throws {
+        let lines = (1...24).map { "let row\($0) = \($0)" }.joined(separator: "\n")
+        let block = AgentBlock(
+            id: "table-markdown-code",
+            kind: .markdown,
+            content: .markdown(.init(markdown: "```swift\n\(lines)\n```", isFinal: true)),
+            state: .succeeded,
+            createdAt: .distantPast
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(
+                id: "table-markdown-code-conversation",
+                turns: [
+                    .init(
+                        id: "turn",
+                        role: .assistant,
+                        blocks: [block],
+                        state: .completed,
+                        createdAt: .distantPast
+                    )
+                ]
+            )
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: .init(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        let path = IndexPath(row: 0, section: 0)
+        let cell = try XCTUnwrap(tableView.cellForRow(at: path) as? AgentTableBlockCell)
+        await cell.waitForPendingRendering()
+        tableView.layoutIfNeeded()
+
+        XCTAssertEqual(
+            controller.tableView(tableView, heightForRowAt: path),
+            UITableView.automaticDimension
+        )
+        let collapsedHeight = tableView.rectForRow(at: path).height
+        let disclosure = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentMarkdownCodeDisclosureButton"
+            } as? UIButton
+        )
+        disclosure.sendActions(for: .touchUpInside)
+        try await Task.sleep(for: .milliseconds(350))
+        tableView.layoutIfNeeded()
+
+        XCTAssertGreaterThan(tableView.rectForRow(at: path).height, collapsedHeight)
+        let expandedCell = try XCTUnwrap(
+            tableView.cellForRow(at: path) as? AgentTableBlockCell
+        )
+        await expandedCell.waitForPendingRendering()
+        let expandedDisclosure = try XCTUnwrap(
+            expandedCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentMarkdownCodeDisclosureButton"
+            } as? UIButton
+        )
+        XCTAssertEqual(expandedDisclosure.configuration?.title, AgentStrings.showLess)
+
+        controller.apply(theme: .system)
+        controller.view.layoutIfNeeded()
+        let themedCell = try XCTUnwrap(
+            tableView.cellForRow(at: path) as? AgentTableBlockCell
+        )
+        await themedCell.waitForPendingRendering()
+        let themedDisclosure = try XCTUnwrap(
+            themedCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentMarkdownCodeDisclosureButton"
+            } as? UIButton
+        )
+        XCTAssertEqual(themedDisclosure.configuration?.title, AgentStrings.showLess)
+    }
+
+    func testMarkdownImageUsesProviderAndRoutesPreview() async throws {
+        let image = UIGraphicsImageRenderer(size: .init(width: 24, height: 16)).image { context in
+            UIColor.systemTeal.setFill()
+            context.fill(.init(x: 0, y: 0, width: 24, height: 16))
+        }
+        let block = AgentBlock(
+            id: "markdown-image",
+            kind: .markdown,
+            content: .markdown(
+                .init(
+                    markdown: "Before *emphasis ![Architecture](diagram-preview) after*.",
+                    isFinal: true
+                )
+            ),
+            state: .succeeded,
+            createdAt: .distantPast
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.markdown])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 320, height: 480),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        var receivedAction: AgentBlockUIAction?
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(
+                turn: turn,
+                block: block,
+                imageProvider: StubImageProvider(result: image),
+                actionSink: .init { receivedAction = $0 }
+            )
+        )
+
+        await (cell as? AgentBlockCell)?.waitForPendingRendering()
+        let markdownImage = try XCTUnwrap(
+            cell.contentView.allSubviews.compactMap { $0 as? AgentMarkdownImageView }.first
+        )
+        await markdownImage.waitForLoad()
+        let preview = try XCTUnwrap(
+            markdownImage.allSubviews.compactMap { $0 as? AgentInlineImagePreviewView }.first
+        )
+        let imageView = try XCTUnwrap(
+            markdownImage.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentInlineImagePreviewImage"
+            } as? UIImageView
+        )
+
+        XCTAssertNotNil(imageView.image)
+        XCTAssertTrue(preview.accessibilityActivate())
+        XCTAssertEqual(
+            receivedAction,
+            .previewImage(
+                reference: .localIdentifier("diagram-preview"),
+                alternativeText: "Architecture"
+            )
+        )
+    }
+
+    func testMarkdownImagesInsideLinksListsAndQuotesUseProvider() async throws {
+        let image = UIGraphicsImageRenderer(size: .init(width: 24, height: 16)).image { context in
+            UIColor.systemIndigo.setFill()
+            context.fill(.init(x: 0, y: 0, width: 24, height: 16))
+        }
+        let block = AgentBlock(
+            id: "nested-markdown-images",
+            kind: .markdown,
+            content: .markdown(
+                .init(
+                    markdown: """
+                        > Quoted [![Quote](quote-preview)](https://example.com/quote)
+
+                        - Item with **![List](list-preview)**
+                        """,
+                    isFinal: true
+                )
+            ),
+            state: .succeeded,
+            createdAt: .distantPast
+        )
+        let turn = AgentTurn(
+            id: "nested-markdown-images-turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.markdown])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 320, height: 480),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        var receivedActions: [AgentBlockUIAction] = []
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(
+                turn: turn,
+                block: block,
+                imageProvider: StubImageProvider(result: image),
+                actionSink: .init { receivedActions.append($0) }
+            )
+        )
+
+        await (cell as? AgentBlockCell)?.waitForPendingRendering()
+        let markdownImages = cell.contentView.allSubviews.compactMap {
+            $0 as? AgentMarkdownImageView
+        }
+        XCTAssertEqual(markdownImages.count, 2)
+        for markdownImage in markdownImages {
+            await markdownImage.waitForLoad()
+        }
+
+        let previews = cell.contentView.allSubviews.compactMap {
+            $0 as? AgentInlineImagePreviewView
+        }
+        XCTAssertEqual(previews.count, 2)
+        XCTAssertTrue(previews.allSatisfy { $0.targetSize.width < 320 })
+        XCTAssertTrue(previews.allSatisfy { $0.accessibilityActivate() })
+        XCTAssertEqual(
+            Set(receivedActions),
+            Set([
+                .previewImage(
+                    reference: .localIdentifier("quote-preview"),
+                    alternativeText: "Quote"
+                ),
+                .previewImage(
+                    reference: .localIdentifier("list-preview"),
+                    alternativeText: "List"
+                ),
+            ])
+        )
+    }
+
+    func testRawUnifiedDiffParsesOffMainActorAndUpdatesSummary() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        let block = AgentBlock(
+            id: "raw-diff",
+            kind: .diff,
+            content: .diff(
+                .init(
+                    title: "Parsed diff",
+                    rawUnifiedDiff: """
+                        --- a/Old.swift
+                        +++ b/New.swift
+                        @@ -1 +1 @@
+                        -let old = true
+                        +let updated = true
+                        """
+                )
+            ),
+            state: .succeeded,
+            revision: 3,
+            createdAt: date
+        )
+        let turn = AgentTurn(
+            id: "raw-diff-turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: date
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.diff])
+        let tableView = UITableView(frame: .init(x: 0, y: 0, width: 390, height: 600))
+        renderer.register(in: tableView)
+        let cell = try XCTUnwrap(
+            renderer.dequeueConfiguredCell(
+                from: tableView,
+                at: .init(row: 0, section: 0),
+                context: renderContext(turn: turn, block: block)
+            ) as? AgentTableBlockCell
+        )
+
+        await cell.waitForPendingRendering()
+
+        let labels = cell.contentView.allSubviews.compactMap { ($0 as? UILabel)?.text }
+        XCTAssertTrue(labels.contains("1 files · +1 −1"))
+    }
+
+    func testTruncatedRawUnifiedDiffMarksStatisticsAsIncomplete() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        let additions = (0..<1_100).map { "+line \($0)" }.joined(separator: "\n")
+        let block = AgentBlock(
+            id: "truncated-raw-diff",
+            kind: .diff,
+            content: .diff(
+                .init(
+                    title: "Large diff",
+                    rawUnifiedDiff: """
+                        --- a/Large.swift
+                        +++ b/Large.swift
+                        @@ -0,0 +1,1100 @@
+                        \(additions)
+                        """
+                )
+            ),
+            state: .succeeded,
+            revision: 1,
+            createdAt: date
+        )
+        let turn = AgentTurn(
+            id: "truncated-raw-diff-turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: date
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.diff])
+        let tableView = UITableView(frame: .init(x: 0, y: 0, width: 390, height: 600))
+        renderer.register(in: tableView)
+        let cell = try XCTUnwrap(
+            renderer.dequeueConfiguredCell(
+                from: tableView,
+                at: .init(row: 0, section: 0),
+                context: renderContext(turn: turn, block: block)
+            ) as? AgentTableBlockCell
+        )
+
+        await cell.waitForPendingRendering()
+
+        let labels = cell.contentView.allSubviews.compactMap { ($0 as? UILabel)?.text }
+        XCTAssertTrue(
+            labels.contains { label in
+                label.contains("1 files") && label.contains(AgentStrings.outputTruncated)
+            }
+        )
+    }
+
     func testMarkdownContentUsesTheSameHorizontalBaselineAsCompactRows() async throws {
         let date = Date(timeIntervalSince1970: 0)
         let activity = AgentBlock(
@@ -2142,7 +3341,7 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertNil(cache.height(for: three))
     }
 
-    func testTableTextRowsUseCalculatedHeightsAndLightweightLabels() throws {
+    func testTableTextRowsUseCalculatedHeightsAndSemanticTextViews() async throws {
         let date = Date(timeIntervalSince1970: 0)
         let turns = [
             AgentTurn(
@@ -2168,7 +3367,7 @@ final class AgentTimelineTests: XCTestCase {
                         id: "calculated-markdown",
                         kind: .markdown,
                         content: .markdown(
-                            .init(markdown: "A **simple** Markdown paragraph.", isFinal: true)
+                            .init(markdown: "A simple Markdown paragraph.", isFinal: true)
                         ),
                         state: .succeeded,
                         createdAt: date
@@ -2191,14 +3390,25 @@ final class AgentTimelineTests: XCTestCase {
         )
         tableView.layoutIfNeeded()
 
-        for path in [IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 1)] {
-            let height = controller.tableView(tableView, heightForRowAt: path)
-            XCTAssertNotEqual(height, UITableView.automaticDimension)
-            XCTAssertEqual(tableView.rectForRow(at: path).height, height, accuracy: 1)
-            let cell = try XCTUnwrap(tableView.cellForRow(at: path) as? AgentTableBlockCell)
-            XCTAssertTrue(cell.contentView.allSubviews.contains { $0 is UILabel })
-            XCTAssertFalse(cell.contentView.allSubviews.contains { $0 is UITextView })
-        }
+        let userPath = IndexPath(row: 0, section: 0)
+        let userHeight = controller.tableView(tableView, heightForRowAt: userPath)
+        XCTAssertNotEqual(userHeight, UITableView.automaticDimension)
+        let userCell = try XCTUnwrap(
+            tableView.cellForRow(at: userPath) as? AgentTableBlockCell
+        )
+        XCTAssertTrue(userCell.contentView.allSubviews.contains { $0 is UILabel })
+        XCTAssertFalse(userCell.contentView.allSubviews.contains { $0 is UITextView })
+
+        let markdownPath = IndexPath(row: 0, section: 1)
+        let markdownCell = try XCTUnwrap(
+            tableView.cellForRow(at: markdownPath) as? AgentTableBlockCell
+        )
+        await markdownCell.waitForPendingRendering()
+        tableView.performBatchUpdates(nil)
+        tableView.layoutIfNeeded()
+        let markdownHeight = controller.tableView(tableView, heightForRowAt: markdownPath)
+        XCTAssertNotEqual(markdownHeight, UITableView.automaticDimension)
+        XCTAssertTrue(markdownCell.contentView.allSubviews.contains { $0 is UITextView })
     }
 
     func testUpdateSchedulerCoalescesBlockRevisions() async {
@@ -2370,6 +3580,65 @@ final class AgentTimelineTests: XCTestCase {
         }
     }
 
+    private func dynamicTypeMarkdownStore(id: AgentConversationID) -> AgentConversationStore {
+        AgentConversationStore(
+            snapshot: .init(
+                id: id,
+                turns: [
+                    .init(
+                        id: "dynamic-type-turn",
+                        role: .assistant,
+                        blocks: [
+                            .init(
+                                id: "dynamic-type-markdown",
+                                kind: .markdown,
+                                content: .markdown(
+                                    .init(
+                                        markdown: """
+                                            # Dynamic heading
+
+                                            ```swift
+                                            let category = "accessible"
+                                            ```
+                                            """,
+                                        isFinal: true
+                                    )
+                                ),
+                                state: .succeeded,
+                                createdAt: .distantPast
+                            )
+                        ],
+                        state: .completed,
+                        createdAt: .distantPast
+                    )
+                ]
+            )
+        )
+    }
+
+    private func headingFont(in markdown: AgentMarkdownContentView) throws -> UIFont {
+        let codeBlocks = markdown.allSubviews.compactMap { $0 as? AgentMarkdownCodeBlockView }
+        let heading = try XCTUnwrap(
+            markdown.allSubviews.compactMap { $0 as? AgentSelectableTextView }.first { textView in
+                !codeBlocks.contains { textView.isDescendant(of: $0) }
+                    && textView.attributedText.length > 0
+            }
+        )
+        return try XCTUnwrap(
+            heading.attributedText.attribute(.font, at: 0, effectiveRange: nil) as? UIFont
+        )
+    }
+
+    private func codeFont(in markdown: AgentMarkdownContentView) throws -> UIFont {
+        let codeBlock = try XCTUnwrap(
+            markdown.allSubviews.compactMap { $0 as? AgentMarkdownCodeBlockView }.first
+        )
+        let codeView = try XCTUnwrap(
+            codeBlock.allSubviews.compactMap { $0 as? AgentSelectableTextView }.first
+        )
+        return try XCTUnwrap(codeView.font)
+    }
+
     private func fixedHeightLayout() -> UICollectionViewCompositionalLayout {
         let size = NSCollectionLayoutSize(
             widthDimension: .fractionalWidth(1),
@@ -2520,4 +3789,24 @@ private final class ComposerDelegateSpy: AgentConversationViewControllerDelegate
 
 extension UIView {
     fileprivate var allSubviews: [UIView] { subviews + subviews.flatMap(\.allSubviews) }
+}
+
+extension AgentBlockContent {
+    fileprivate var blockKind: AgentBlockKind {
+        switch self {
+        case .userText: .userText
+        case .markdown: .markdown
+        case .activity: .activity
+        case .tool: .tool
+        case .command: .command
+        case .fileSearch: .fileSearch
+        case .fileOperation: .fileOperation
+        case .diff: .diff
+        case .approval: .approval
+        case .artifact: .artifact
+        case .image: .image
+        case .error: .error
+        case .custom(let value): .init(rawValue: value.kind)
+        }
+    }
 }

@@ -206,7 +206,7 @@ final class AgentTableScrollCoordinator {
         animator.startAnimation()
     }
 
-    private var isFollowingLatest: Bool {
+    var isFollowingLatest: Bool {
         if case .followingLatest = mode { return true }
         return false
     }

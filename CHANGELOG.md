@@ -17,6 +17,8 @@ All notable changes are documented here. This project follows Semantic Versionin
   validation, and an in-app Test Lab with diagnostics.
 - Snapshot baselines and Demo XCUITests for rich composer, lifecycle, streaming Markdown, and table
   rendering paths.
+- Public API baseline checking, all-block visual regression fixtures, and deterministic coverage for
+  all six normative stress scenarios.
 
 ### Changed
 
@@ -29,3 +31,6 @@ All notable changes are documented here. This project follows Semantic Versionin
   a dedicated Test Lab scenario and regression coverage.
 - Moved table-timeline timestamps from section headers into a final cell for each Turn, aligned
   beneath the corresponding user bubble or assistant response region.
+- Added selectable attributed Markdown, horizontal/collapsible fenced code, Markdown images, cached
+  background diff parsing, complete block context menus, pointer feedback, and composer drag/drop.
+- Preserved semantic anchors through iPad resizing and twenty-page mixed-height history prepends.

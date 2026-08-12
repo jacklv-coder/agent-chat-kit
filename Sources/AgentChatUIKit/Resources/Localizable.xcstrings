@@ -43,10 +43,46 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "正在连接" } }
       }
     },
+    "Copy" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制" } }
+      }
+    },
+    "Copy command" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy command" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制命令" } }
+      }
+    },
+    "Copy output" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy output" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制输出" } }
+      }
+    },
+    "Copy raw" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy raw" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制原始内容" } }
+      }
+    },
     "Copy raw payload" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Copy raw payload" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "复制原始数据" } }
+      }
+    },
+    "Code" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Code" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "代码" } }
+      }
+    },
+    "Code truncated" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Code truncated" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "代码已截断" } }
       }
     },
     "Created" : {
@@ -145,6 +181,18 @@
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开" } }
       }
     },
+    "Open full diff" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open full diff" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开完整差异" } }
+      }
+    },
+    "Open full output" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Open full output" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "打开完整输出" } }
+      }
+    },
     "Output" : {
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Output" } },
@@ -209,6 +257,18 @@
       "localizations" : {
         "en" : { "stringUnit" : { "state" : "translated", "value" : "Send" } },
         "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "发送" } }
+      }
+    },
+    "Show less" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show less" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "收起" } }
+      }
+    },
+    "Show more" : {
+      "localizations" : {
+        "en" : { "stringUnit" : { "state" : "translated", "value" : "Show more" } },
+        "zh-Hans" : { "stringUnit" : { "state" : "translated", "value" : "展开" } }
       }
     },
     "Stop" : {

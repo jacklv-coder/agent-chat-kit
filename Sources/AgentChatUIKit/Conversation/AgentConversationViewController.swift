@@ -33,6 +33,9 @@ public final class AgentConversationViewController: UIViewController {
     private var pendingCellReconfigurationBlockIDs: Set<AgentBlockID> = []
     private var pendingHeightChangeBlockIDs: Set<AgentBlockID> = []
     private var needsInitialScrollToLatest = true
+    private var pendingViewportResizeAnchor: AgentLayoutAnchor?
+    private var pendingViewportResizeRestorationAnchor: AgentLayoutAnchor?
+    private var pendingViewportResizeWasFollowingLatest = false
     private var bannerHeightConstraint: NSLayoutConstraint?
 
     /// Creates a scene-scoped conversation controller.
@@ -97,6 +100,12 @@ public final class AgentConversationViewController: UIViewController {
             name: UIApplication.willEnterForegroundNotification,
             object: nil
         )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(contentSizeCategoryDidChange),
+            name: UIContentSizeCategory.didChangeNotification,
+            object: nil
+        )
         displayedTurns = presentationTurns
         collectionView.reloadData()
         observeStore()
@@ -110,6 +119,90 @@ public final class AgentConversationViewController: UIViewController {
         guard needsInitialScrollToLatest else { return }
         needsInitialScrollToLatest = false
         scrollCoordinator.scrollToLatest()
+    }
+
+    public override func viewWillTransition(
+        to size: CGSize,
+        with coordinator: any UIViewControllerTransitionCoordinator
+    ) {
+        let anchor = beginViewportResize()
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(
+            alongsideTransition: { [weak self] _ in
+                self?.collectionView.collectionViewLayout.invalidateLayout()
+            },
+            completion: { [weak self] _ in
+                self?.endViewportResize(restoring: anchor)
+            }
+        )
+    }
+
+    public override func didReceiveMemoryWarning() {
+        super.didReceiveMemoryWarning()
+        rendererRegistry.removeCachedData()
+    }
+
+    func beginViewportResize() -> AgentLayoutAnchor? {
+        let wasFollowingLatest = scrollCoordinator.isFollowingLatest
+        let anchor = scrollCoordinator.captureAnchor(edge: wasFollowingLatest ? .bottom : .top)
+        pendingViewportResizeAnchor = anchor
+        pendingViewportResizeRestorationAnchor = nil
+        pendingViewportResizeWasFollowingLatest = wasFollowingLatest
+        collectionView.collectionViewLayout.invalidateLayout()
+        return anchor
+    }
+
+    func endViewportResize(restoring anchor: AgentLayoutAnchor?) {
+        guard let anchor, pendingViewportResizeAnchor == anchor else { return }
+        guard !isPerformingCollectionUpdate else {
+            pendingViewportResizeRestorationAnchor = anchor
+            return
+        }
+        performViewportResizeRestoration(anchor)
+    }
+
+    private func performViewportResizeRestoration(_ anchor: AgentLayoutAnchor) {
+        guard pendingViewportResizeAnchor == anchor else { return }
+        // Rich Markdown children capture the available content width when they are built.
+        // Recreate only visible items after the new bounds have landed; off-screen items
+        // are configured with the new width when they are next dequeued.
+        let visibleItems = collectionView.indexPathsForVisibleItems
+        isPerformingCollectionUpdate = true
+        UIView.performWithoutAnimation {
+            collectionView.performBatchUpdates {
+                if !visibleItems.isEmpty {
+                    collectionView.reconfigureItems(at: visibleItems)
+                }
+            } completion: { [weak self] _ in
+                guard let self else { return }
+                guard self.pendingViewportResizeAnchor == anchor else {
+                    self.completeCollectionUpdate()
+                    return
+                }
+                self.collectionView.layoutIfNeeded()
+                self.restoreViewportAfterResize(anchor)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    guard self.pendingViewportResizeAnchor == anchor else {
+                        self.completeCollectionUpdate()
+                        return
+                    }
+                    self.collectionView.layoutIfNeeded()
+                    self.restoreViewportAfterResize(anchor)
+                    self.pendingViewportResizeAnchor = nil
+                    self.pendingViewportResizeWasFollowingLatest = false
+                    self.completeCollectionUpdate()
+                }
+            }
+        }
+    }
+
+    private func restoreViewportAfterResize(_ anchor: AgentLayoutAnchor) {
+        if pendingViewportResizeWasFollowingLatest {
+            scrollCoordinator.scrollToLatest()
+        } else {
+            scrollCoordinator.restore(anchor)
+        }
     }
 
     /// Replaces the current visual theme and invalidates appearance-sensitive caches.
@@ -239,6 +332,7 @@ public final class AgentConversationViewController: UIViewController {
         jumpConfiguration.imagePadding = 5
         jumpConfiguration.cornerStyle = .capsule
         jumpToLatestButton.configuration = jumpConfiguration
+        jumpToLatestButton.isPointerInteractionEnabled = true
         jumpToLatestButton.translatesAutoresizingMaskIntoConstraints = false
         jumpToLatestButton.isHidden = true
         jumpToLatestButton.accessibilityIdentifier = "AgentConversationJumpToLatestButton"
@@ -525,6 +619,11 @@ public final class AgentConversationViewController: UIViewController {
                 apply(pending)
                 return
             }
+            if let anchor = pendingViewportResizeRestorationAnchor {
+                pendingViewportResizeRestorationAnchor = nil
+                performViewportResizeRestoration(anchor)
+                return
+            }
             if let blockID = pendingCellReconfigurationBlockIDs.first {
                 pendingCellReconfigurationBlockIDs.remove(blockID)
                 reconfigure(blockID)
@@ -576,7 +675,7 @@ public final class AgentConversationViewController: UIViewController {
 
         case .copy(let blockID):
             if let block = turnAndBlock(for: blockID)?.block {
-                UIPasteboard.general.string = copyText(for: block)
+                UIPasteboard.general.string = AgentBlockCopyText.text(for: block)
             }
 
         case .openArtifact(let id):
@@ -972,20 +1071,6 @@ public final class AgentConversationViewController: UIViewController {
         resolvingApprovalIDs.formIntersection(unresolved)
     }
 
-    private func copyText(for block: AgentBlock) -> String {
-        switch block.content {
-        case .userText(let value): value.text
-        case .markdown(let value): value.markdown
-        case .command(let value): value.output.text.isEmpty ? value.command : value.output.text
-        case .custom(let value):
-            (try? String(
-                data: JSONEncoder().encode(value.payload),
-                encoding: .utf8
-            )) ?? value.fallbackTitle
-        default: String(describing: block.content)
-        }
-    }
-
     @objc private func sendFromKeyboard() {
         composer.submitCurrentInput()
     }
@@ -1003,6 +1088,12 @@ public final class AgentConversationViewController: UIViewController {
 
     @objc private func applicationWillEnterForeground() {
         updateScheduler.setActive(true)
+    }
+
+    @objc private func contentSizeCategoryDidChange() {
+        guard isViewLoaded, view.window != nil else { return }
+        let anchor = beginViewportResize()
+        endViewportResize(restoring: anchor)
     }
 }
 
@@ -1040,6 +1131,23 @@ extension AgentConversationViewController: UICollectionViewDataSource, UICollect
             }
         }
         return cell
+    }
+
+    public func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let (turn, block) = displayedTurnAndBlock(at: indexPath) else { return nil }
+        return UIContextMenuConfiguration(
+            identifier: block.id.rawValue as NSString,
+            previewProvider: nil
+        ) { [weak self] _ in
+            guard let self else { return nil }
+            return AgentBlockContextMenu.make(
+                for: self.makeRenderContext(turn: turn, block: block)
+            )
+        }
     }
 
     public func collectionView(

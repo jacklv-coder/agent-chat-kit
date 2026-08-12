@@ -117,6 +117,8 @@ jobs:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
       - name: Format lint
@@ -130,3 +132,7 @@ jobs:
           xcodebuild docbuild -scheme AgentChatKit-Package
           -destination 'generic/platform=iOS Simulator'
           -skipPackagePluginValidation
+      - name: Check public API baseline
+        env:
+          AGENTCHAT_API_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: Scripts/check-api-baseline.sh

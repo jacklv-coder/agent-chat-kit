@@ -33,7 +33,8 @@ public actor AgentMarkdownParser {
         return parseImmediately(source)
     }
 
-    private nonisolated func convertBlocks(_ children: MarkupChildren) -> [AgentMarkdownRenderBlock] {
+    private nonisolated func convertBlocks(_ children: MarkupChildren) -> [AgentMarkdownRenderBlock]
+    {
         children.flatMap { convertBlock($0) }
     }
 

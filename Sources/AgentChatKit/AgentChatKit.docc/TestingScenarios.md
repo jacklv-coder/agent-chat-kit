@@ -79,3 +79,8 @@ Run the same controller-level cases against ``AgentTableConversationViewControll
 turn-to-section and block-to-row mapping, a bottom insertion followed by parsed Markdown height growth,
 rapid disclosure during a structural insertion, and viewport preservation after history sections are
 prepended.
+
+The checked-in visual matrix renders the production TableView page rather than a test-only facsimile.
+Together its phone/iPad, portrait/landscape, Light/Dark, High Contrast, accessibility-text, English,
+Chinese, and RTL fixtures cover every built-in block family. See `Documentation/Performance.md` for
+the six deterministic stress scenarios and the separate physical-device Instruments gate.
