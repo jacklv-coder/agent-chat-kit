@@ -49,6 +49,15 @@ jobs:
           -destination "$DESTINATION"
           -only-testing:${{ matrix.suite }}
           -skipPackagePluginValidation test
+      - name: Upload snapshot diagnostics
+        if: failure() && matrix.suite == 'AgentChatSnapshotTests'
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-diagnostics-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          path: |
+            Tests/AgentChatSnapshotTests/__Snapshots__/**/*.png
+            /Users/runner/Library/Developer/CoreSimulator/Devices/*/data/tmp/AgentChatSnapshotTests/*.png
 
   thread-sanitizer:
     runs-on: macos-15

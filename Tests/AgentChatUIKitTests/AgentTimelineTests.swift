@@ -781,10 +781,20 @@ final class AgentTimelineTests: XCTestCase {
         controller.view.layoutIfNeeded()
         controller.endViewportResize(restoring: resizeAnchor)
 
-        try await Task.sleep(for: .milliseconds(250))
-        controller.view.layoutIfNeeded()
-        collectionView.layoutIfNeeded()
+        let updateSettled = await waitUntil(timeout: 10) {
+            controller.view.layoutIfNeeded()
+            collectionView.layoutIfNeeded()
+            guard collectionView.numberOfSections == 2,
+                collectionView.cellForItem(at: .init(item: 0, section: 1)) != nil,
+                let commandCell = collectionView.cellForItem(at: commandPath) as? AgentBlockCell,
+                let details = commandCell.contentView.allSubviews.first(where: {
+                    $0.accessibilityIdentifier == "AgentActivityEventDetails"
+                })
+            else { return false }
+            return details.isHidden && abs(commandCell.frame.height - collapsedHeight) <= 1
+        }
 
+        XCTAssertTrue(updateSettled)
         XCTAssertEqual(collectionView.numberOfSections, 2)
         XCTAssertNotNil(collectionView.cellForItem(at: .init(item: 0, section: 1)))
         let finalCell = try XCTUnwrap(
@@ -1550,17 +1560,27 @@ final class AgentTimelineTests: XCTestCase {
             )
         )
 
-        try await Task.sleep(for: .milliseconds(200))
-        tableView.layoutIfNeeded()
         let section = try XCTUnwrap(
             updated.turns.firstIndex { $0.blocks.contains { $0.id == anchoredBlockID } }
         )
         let restored = IndexPath(row: 0, section: section)
+        let updateSettled = await waitUntil(timeout: 10) {
+            tableView.layoutIfNeeded()
+            guard tableView.numberOfSections == initialTurns.count + older.count else {
+                return false
+            }
+            let offset =
+                tableView.rectForRow(at: restored).minY
+                - tableView.contentOffset.y
+                - tableView.adjustedContentInset.top
+            return abs(offset - originalOffset) <= 1
+        }
         let restoredOffset =
             tableView.rectForRow(at: restored).minY
             - tableView.contentOffset.y
             - tableView.adjustedContentInset.top
 
+        XCTAssertTrue(updateSettled)
         XCTAssertEqual(tableView.numberOfSections, initialTurns.count + older.count)
         XCTAssertEqual(restoredOffset, originalOffset, accuracy: 1)
     }
@@ -1951,9 +1971,29 @@ final class AgentTimelineTests: XCTestCase {
                     ]
                 )
             )
-            try await Task.sleep(for: .milliseconds(90))
+            let expectedSectionCount = current.count + (page + 1) * pageTurns.count
+            let expectedAnchorSection = 25 + (page + 1) * pageTurns.count
+            guard
+                await waitUntil(
+                    timeout: 15, interval: .milliseconds(25),
+                    condition: {
+                        tableView.layoutIfNeeded()
+                        guard tableView.numberOfSections == expectedSectionCount else {
+                            return false
+                        }
+                        let offset =
+                            tableView.rectForRow(
+                                at: .init(row: 0, section: expectedAnchorSection)
+                            ).minY
+                            - tableView.contentOffset.y
+                            - tableView.adjustedContentInset.top
+                        return abs(offset - originalOffset) <= 2
+                    })
+            else {
+                XCTFail("History page \(page + 1) did not preserve its semantic anchor")
+                return
+            }
         }
-        try await Task.sleep(for: .milliseconds(200))
         tableView.layoutIfNeeded()
         let section = try XCTUnwrap(
             updated.turns.firstIndex { $0.blocks.contains { $0.id == anchoredBlockID } }
@@ -3681,6 +3721,20 @@ final class AgentTimelineTests: XCTestCase {
             imageProvider: imageProvider,
             actionSink: actionSink
         )
+    }
+
+    private func waitUntil(
+        timeout: TimeInterval,
+        interval: Duration = .milliseconds(20),
+        condition: @escaping @MainActor () -> Bool
+    ) async -> Bool {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            if condition() { return true }
+            await Task.yield()
+            try? await Task.sleep(for: interval)
+        }
+        return condition()
     }
 }
 

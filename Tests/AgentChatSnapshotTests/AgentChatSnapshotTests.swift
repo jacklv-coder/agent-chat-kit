@@ -226,7 +226,7 @@ final class AgentChatSnapshotTests: XCTestCase {
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
 
-        try? await Task.sleep(for: .milliseconds(250))
+        try? await Task.sleep(for: .milliseconds(50))
         controller.view.setNeedsLayout()
         controller.view.layoutIfNeeded()
         guard let tableView = controller.view.findSubview(of: UITableView.self) else {
@@ -240,6 +240,7 @@ final class AgentChatSnapshotTests: XCTestCase {
             animated: false
         )
         tableView.layoutIfNeeded()
+        await settleConversationRendering(tableView: tableView, controller: controller)
 
         let rendererFormat = UIGraphicsImageRendererFormat(for: traits)
         rendererFormat.scale = traits.displayScale
@@ -262,6 +263,36 @@ final class AgentChatSnapshotTests: XCTestCase {
             testName: testName,
             line: line
         )
+    }
+
+    private func settleConversationRendering(
+        tableView: UITableView,
+        controller: UIViewController
+    ) async {
+        var previousContentSize = CGSize.zero
+        for _ in 0..<8 {
+            let visibleCells = tableView.visibleCells.compactMap { $0 as? AgentTableBlockCell }
+            for cell in visibleCells {
+                await cell.waitForPendingRendering()
+            }
+            await Task.yield()
+            try? await Task.sleep(for: .milliseconds(25))
+            controller.view.setNeedsLayout()
+            controller.view.layoutIfNeeded()
+            tableView.layoutIfNeeded()
+            let contentSize = tableView.contentSize
+            if contentSize == previousContentSize,
+                visibleCells.count == tableView.visibleCells.count
+            {
+                break
+            }
+            previousContentSize = contentSize
+        }
+        tableView.setContentOffset(
+            .init(x: 0, y: -tableView.adjustedContentInset.top),
+            animated: false
+        )
+        tableView.layoutIfNeeded()
     }
 
     private func richContentBlocks() -> [AgentBlock] {
