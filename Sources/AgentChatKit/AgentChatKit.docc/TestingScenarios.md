@@ -66,6 +66,9 @@ before declaring a conversation experience complete.
 For bottom-follow regressions, cover both structural insertion and a parsed Markdown result whose
 final self-sizing height differs from its estimate. Assert a zero bottom distance after layout and
 verify that the same reconciliation becomes a no-op as soon as direct manipulation begins.
+Use the Demo's **Bottom Batch Insertion** scenario to isolate this path: it waits on 18 fixed-height
+messages, then emits eight tail turns inside one scheduler window. The controller regression samples
+the presentation-layer offset and rejects reverse movement or a single full-distance jump.
 
 For disclosure regressions, assert that a visible tool row reconfigures without layer animations, keeps
 the tapped header at the same viewport position, updates accessibility state, and resolves the expanded

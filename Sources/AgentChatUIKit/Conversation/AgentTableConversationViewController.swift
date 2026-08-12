@@ -19,6 +19,7 @@ public final class AgentTableConversationViewController: UIViewController {
     private let jumpToLatestButton = UIButton(type: .system)
     private let historyLoadingIndicator = UIActivityIndicatorView(style: .medium)
     private var displayedTurns: [AgentTurn] = []
+    private let rowHeightCache = AgentItemSizeCache()
     private var updateScheduler: AgentUpdateScheduler!
     private var scrollCoordinator: AgentTableScrollCoordinator!
     private var patchTask: Task<Void, Never>?
@@ -31,6 +32,7 @@ public final class AgentTableConversationViewController: UIViewController {
     private var isPerformingTableUpdate = false
     private var pendingTableUpdate: AgentScheduledUpdate?
     private var pendingRowReconfigurationBlockIDs: Set<AgentBlockID> = []
+    private var pendingAnimatedRowReconfigurationBlockIDs: Set<AgentBlockID> = []
     private var pendingHeightChangeBlockIDs: Set<AgentBlockID> = []
     private var needsInitialScrollToLatest = true
     private var bannerHeightConstraint: NSLayoutConstraint?
@@ -102,6 +104,7 @@ public final class AgentTableConversationViewController: UIViewController {
     /// Replaces the current visual theme and reloads visible rows without animation.
     public func apply(theme: AgentChatTheme) {
         self.theme = theme
+        rowHeightCache.invalidateAppearance()
         view.backgroundColor = theme.colors.background
         tableView.backgroundColor = theme.colors.background
         UIView.performWithoutAnimation { tableView.reloadData() }
@@ -193,8 +196,8 @@ public final class AgentTableConversationViewController: UIViewController {
         tableView.separatorStyle = .none
         tableView.rowHeight = UITableView.automaticDimension
         tableView.estimatedRowHeight = 44
-        tableView.sectionHeaderHeight = UITableView.automaticDimension
-        tableView.estimatedSectionHeaderHeight = 28
+        tableView.sectionHeaderHeight = .leastNormalMagnitude
+        tableView.estimatedSectionHeaderHeight = 0
         tableView.sectionFooterHeight = 8
         tableView.estimatedSectionFooterHeight = 8
         tableView.accessibilityIdentifier = "AgentTableConversationTimeline"
@@ -271,8 +274,8 @@ public final class AgentTableConversationViewController: UIViewController {
     private func configureDataSource() {
         rendererRegistry.registerAll(in: tableView)
         tableView.register(
-            AgentTableTurnHeaderView.self,
-            forHeaderFooterViewReuseIdentifier: AgentTableTurnHeaderView.reuseIdentifier
+            AgentTableTurnMetadataCell.self,
+            forCellReuseIdentifier: AgentTableTurnMetadataCell.reuseIdentifier
         )
         tableView.dataSource = self
         tableView.delegate = self
@@ -348,6 +351,8 @@ public final class AgentTableConversationViewController: UIViewController {
                 to: updatedTurns,
                 anchor: anchor,
                 followLatest: shouldFollow,
+                animatesBottomAppend: shouldAnimateTableUpdates,
+                isHistoryPrepend: isPrepend,
                 forceReload: update.patches.contains {
                     if case .replaceAll = $0 { return true }
                     return false
@@ -360,8 +365,9 @@ public final class AgentTableConversationViewController: UIViewController {
         }
 
         displayedTurns = presentationTurns
+        update.reconfiguredBlockIDs.forEach(rowHeightCache.invalidate(blockID:))
         let existing = Set(displayedTurns.flatMap { $0.blocks.map(\.id) })
-        let updatedRows = update.reconfiguredBlockIDs
+        let contentRows = update.reconfiguredBlockIDs
             .filter(existing.contains)
             .compactMap(indexPath(for:))
         let turnIDs = Set(
@@ -369,7 +375,11 @@ public final class AgentTableConversationViewController: UIViewController {
                 if case .reconfigureTurn(let turnID) = patch { return turnID }
                 return nil
             })
-        reconfigureVisibleTurnHeaders(ids: turnIDs)
+        let metadataRows = displayedTurns.enumerated().compactMap { section, turn -> IndexPath? in
+            guard turnIDs.contains(turn.id), !turn.blocks.isEmpty else { return nil }
+            return IndexPath(row: turn.blocks.count, section: section)
+        }
+        let updatedRows = Array(Set(contentRows + metadataRows)).sorted()
         guard !updatedRows.isEmpty else { return }
 
         isPerformingTableUpdate = true
@@ -387,6 +397,8 @@ public final class AgentTableConversationViewController: UIViewController {
         to updatedTurns: [AgentTurn],
         anchor: AgentLayoutAnchor?,
         followLatest: Bool,
+        animatesBottomAppend: Bool,
+        isHistoryPrepend: Bool,
         forceReload: Bool
     ) {
         isPerformingTableUpdate = true
@@ -408,19 +420,66 @@ public final class AgentTableConversationViewController: UIViewController {
             return
         }
 
+        let metadataTransitions = metadataRowTransitions(
+            from: previousTurns,
+            to: updatedTurns
+        )
         displayedTurns = updatedTurns
-        UIView.performWithoutAnimation {
-            tableView.performBatchUpdates {
-                tableView.deleteRows(at: changes.deletedItems, with: .none)
-                tableView.deleteSections(changes.deletedSections, with: .none)
-                tableView.insertSections(changes.insertedSections, with: .none)
-                tableView.insertRows(at: changes.insertedItems, with: .none)
-            } completion: { [weak self] _ in
+        let shouldAnimateAppend =
+            animatesBottomAppend
+            && followLatest
+            && !isHistoryPrepend
+            && anchor == nil
+            && changes.appendsAtEnd
+        let updates = { [self] in
+            tableView.deleteRows(
+                at: changes.deletedItems + metadataTransitions.deletedRows,
+                with: .none
+            )
+            tableView.deleteSections(changes.deletedSections, with: .none)
+            tableView.insertSections(changes.insertedSections, with: .none)
+            tableView.insertRows(
+                at: changes.insertedItems + metadataTransitions.insertedRows,
+                with: .none
+            )
+        }
+        let completion: (Bool) -> Void = { [weak self] _ in
+            guard let self else { return }
+            self.reloadVisibleRows()
+            let intent = self.completionIntent(anchor: anchor, followLatest: followLatest)
+            if anchor != nil {
+                DispatchQueue.main.async { [weak self] in
+                    self?.finishTableUpdate(intent)
+                }
+            } else {
+                self.finishTableUpdate(intent)
+            }
+        }
+        if shouldAnimateAppend {
+            let preservedOffset = tableView.contentOffset
+            UIView.performWithoutAnimation {
+                tableView.performBatchUpdates(updates)
+                tableView.layoutIfNeeded()
+                reloadVisibleRows()
+                tableView.layoutIfNeeded()
+                tableView.setContentOffset(preservedOffset, animated: false)
+            }
+            tableView.layer.removeAllAnimations()
+            tableView.setContentOffset(preservedOffset, animated: false)
+            scrollCoordinator.animateToLatest { [weak self] finished in
                 guard let self else { return }
-                self.reloadVisibleRows()
-                self.finishTableUpdate(
-                    self.completionIntent(anchor: anchor, followLatest: followLatest)
-                )
+                guard finished, self.scrollCoordinator.shouldAutomaticallyFollowLatest else {
+                    self.finishTableUpdate(.none)
+                    return
+                }
+                self.tableView.layoutIfNeeded()
+                self.scrollCoordinator.animateToLatest(duration: 0.12) { [weak self] _ in
+                    self?.finishTableUpdate(.none)
+                }
+            }
+        } else {
+            UIView.performWithoutAnimation {
+                tableView.performBatchUpdates(updates, completion: completion)
             }
         }
     }
@@ -469,7 +528,8 @@ public final class AgentTableConversationViewController: UIViewController {
             }
             if let blockID = pendingRowReconfigurationBlockIDs.first {
                 pendingRowReconfigurationBlockIDs.remove(blockID)
-                reconfigure(blockID)
+                let animated = pendingAnimatedRowReconfigurationBlockIDs.remove(blockID) != nil
+                reconfigure(blockID, animated: animated)
                 continue
             }
             if let blockID = pendingHeightChangeBlockIDs.first {
@@ -501,14 +561,13 @@ public final class AgentTableConversationViewController: UIViewController {
     private func reloadVisibleRows() {
         guard let rows = tableView.indexPathsForVisibleRows, !rows.isEmpty else { return }
         UIView.performWithoutAnimation { tableView.reloadRows(at: rows, with: .none) }
-        reconfigureVisibleTurnHeaders(ids: Set(displayedTurns.map(\.id)))
     }
 
     private func route(_ action: AgentBlockUIAction) {
         switch action {
         case .toggleExpanded(let blockID):
             if !expandedBlockIDs.insert(blockID).inserted { expandedBlockIDs.remove(blockID) }
-            reconfigure(blockID)
+            reconfigure(blockID, animated: true)
         case .copy(let blockID):
             if let block = turnAndBlock(for: blockID)?.block {
                 UIPasteboard.general.string = copyText(for: block)
@@ -696,6 +755,49 @@ public final class AgentTableConversationViewController: UIViewController {
         return max(1, tableView.bounds.width - inset * 2)
     }
 
+    private var metadataRowHeight: CGFloat {
+        ceil(UIFont.preferredFont(forTextStyle: .caption2).lineHeight) + 4
+    }
+
+    private func isMetadataRow(at indexPath: IndexPath) -> Bool {
+        guard displayedTurns.indices.contains(indexPath.section) else { return false }
+        let blockCount = displayedTurns[indexPath.section].blocks.count
+        return blockCount > 0 && indexPath.row == blockCount
+    }
+
+    private func metadataRowTransitions(
+        from previousTurns: [AgentTurn],
+        to updatedTurns: [AgentTurn]
+    ) -> (deletedRows: [IndexPath], insertedRows: [IndexPath]) {
+        let previousSectionByID = Dictionary(
+            uniqueKeysWithValues: previousTurns.enumerated().map { ($0.element.id, $0.offset) }
+        )
+        let updatedSectionByID = Dictionary(
+            uniqueKeysWithValues: updatedTurns.enumerated().map { ($0.element.id, $0.offset) }
+        )
+        let previousByID = Dictionary(uniqueKeysWithValues: previousTurns.map { ($0.id, $0) })
+
+        var deletedRows: [IndexPath] = []
+        var insertedRows: [IndexPath] = []
+        for updatedTurn in updatedTurns {
+            guard let previousTurn = previousByID[updatedTurn.id],
+                let previousSection = previousSectionByID[updatedTurn.id],
+                let updatedSection = updatedSectionByID[updatedTurn.id]
+            else { continue }
+
+            if !previousTurn.blocks.isEmpty, updatedTurn.blocks.isEmpty {
+                deletedRows.append(
+                    IndexPath(row: previousTurn.blocks.count, section: previousSection)
+                )
+            } else if previousTurn.blocks.isEmpty, !updatedTurn.blocks.isEmpty {
+                insertedRows.append(
+                    IndexPath(row: updatedTurn.blocks.count, section: updatedSection)
+                )
+            }
+        }
+        return (deletedRows, insertedRows)
+    }
+
     private func updateJumpButton(unreadCount: Int) {
         jumpToLatestButton.isHidden = unreadCount == 0
         jumpToLatestButton.accessibilityLabel =
@@ -782,18 +884,43 @@ public final class AgentTableConversationViewController: UIViewController {
         )
     }
 
-    private func reconfigureVisibleTurnHeaders(ids: Set<AgentTurnID>) {
-        guard !ids.isEmpty else { return }
-        for section in displayedTurns.indices where ids.contains(displayedTurns[section].id) {
-            guard
-                let header = tableView.headerView(forSection: section) as? AgentTableTurnHeaderView
-            else { continue }
-            header.configure(
-                turn: displayedTurns[section],
-                maximumContentWidth: theme.metrics.maximumContentWidth,
-                sideInset: theme.metrics.pageInset
-            )
+    private func rowHeightCacheKey(
+        for block: AgentBlock,
+        context: AgentBlockRenderContext
+    ) -> AgentItemSizeCacheKey {
+        var layoutVariant = context.environment.expandedBlockIDs.contains(block.id) ? 1 : 0
+        if context.environment.toolPresentationStyle == .capsule { layoutVariant |= 1 << 1 }
+        if context.environment.canRetry { layoutVariant |= 1 << 2 }
+        if case .approval(let approval) = block.content,
+            context.environment.resolvingApprovalIDs.contains(approval.approvalID)
+        {
+            layoutVariant |= 1 << 3
         }
+        return AgentItemSizeCacheKey(
+            blockID: block.id,
+            revision: block.revision,
+            width: context.availableWidth,
+            contentSizeCategory: traitCollection.preferredContentSizeCategory,
+            themeVersion: theme.version,
+            layoutVariant: layoutVariant
+        )
+    }
+
+    private func calculatedRowHeight(at indexPath: IndexPath) -> CGFloat? {
+        guard tableView.bounds.width > 1,
+            let (turn, block) = displayedTurnAndBlock(at: indexPath)
+        else { return nil }
+        let context = makeRenderContext(turn: turn, block: block)
+        let key = rowHeightCacheKey(for: block, context: context)
+        if let height = rowHeightCache.height(for: key) { return height }
+        guard
+            let provider = rendererRegistry.tableRenderer(for: block)
+                as? any AgentTableBlockLayoutProviding
+        else { return nil }
+        let height = provider.tableRowHeight(for: context)
+        guard height > 0, height != UITableView.automaticDimension else { return nil }
+        rowHeightCache.insert(height: height, for: key)
+        return height
     }
 
     private func handleCellHeightChange(_ blockID: AgentBlockID) {
@@ -825,23 +952,37 @@ public final class AgentTableConversationViewController: UIViewController {
         }
     }
 
-    private func reconfigure(_ blockID: AgentBlockID) {
+    private func reconfigure(_ blockID: AgentBlockID, animated: Bool = false) {
         guard !isPerformingTableUpdate else {
             pendingRowReconfigurationBlockIDs.insert(blockID)
+            if animated { pendingAnimatedRowReconfigurationBlockIDs.insert(blockID) }
             return
         }
         guard let path = indexPath(for: blockID) else { return }
         let viewportOffset = tableView.rectForRow(at: path).minY - tableView.contentOffset.y
         isPerformingTableUpdate = true
-        UIView.performWithoutAnimation {
-            tableView.performBatchUpdates {
-                tableView.reloadRows(at: [path], with: .none)
-            } completion: { [weak self] _ in
-                self?.finishTableUpdate(
-                    .preserveBlock(blockID, viewportOffset: viewportOffset)
-                )
+        let shouldAnimate = animated && shouldAnimateTableUpdates
+        let updates = { [self] in
+            tableView.reloadRows(at: [path], with: shouldAnimate ? .fade : .none)
+        }
+        let completion: (Bool) -> Void = { [weak self] _ in
+            self?.finishTableUpdate(
+                .preserveBlock(blockID, viewportOffset: viewportOffset)
+            )
+        }
+        if shouldAnimate {
+            tableView.performBatchUpdates(updates, completion: completion)
+        } else {
+            UIView.performWithoutAnimation {
+                tableView.performBatchUpdates(updates, completion: completion)
             }
         }
+    }
+
+    private var shouldAnimateTableUpdates: Bool {
+        tableView.window != nil
+            && UIView.areAnimationsEnabled
+            && !UIAccessibility.isReduceMotionEnabled
     }
 
     private func restoreViewportPosition(of blockID: AgentBlockID, offset: CGFloat) {
@@ -903,13 +1044,28 @@ extension AgentTableConversationViewController: UITableViewDataSource, UITableVi
 
     public func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
         guard displayedTurns.indices.contains(section) else { return 0 }
-        return displayedTurns[section].blocks.count
+        let blockCount = displayedTurns[section].blocks.count
+        return blockCount + (blockCount > 0 ? 1 : 0)
     }
 
     public func tableView(
         _ tableView: UITableView,
         cellForRowAt indexPath: IndexPath
     ) -> UITableViewCell {
+        guard displayedTurns.indices.contains(indexPath.section) else {
+            return UITableViewCell()
+        }
+        let turn = displayedTurns[indexPath.section]
+        if !turn.blocks.isEmpty, indexPath.row == turn.blocks.count {
+            guard
+                let cell = tableView.dequeueReusableCell(
+                    withIdentifier: AgentTableTurnMetadataCell.reuseIdentifier,
+                    for: indexPath
+                ) as? AgentTableTurnMetadataCell
+            else { return UITableViewCell() }
+            cell.configure(turn: turn, theme: theme)
+            return cell
+        }
         guard let (turn, block) = displayedTurnAndBlock(at: indexPath) else {
             return UITableViewCell()
         }
@@ -931,19 +1087,25 @@ extension AgentTableConversationViewController: UITableViewDataSource, UITableVi
 
     public func tableView(
         _ tableView: UITableView,
-        viewForHeaderInSection section: Int
-    ) -> UIView? {
-        guard displayedTurns.indices.contains(section),
-            let header = tableView.dequeueReusableHeaderFooterView(
-                withIdentifier: AgentTableTurnHeaderView.reuseIdentifier
-            ) as? AgentTableTurnHeaderView
-        else { return nil }
-        header.configure(
-            turn: displayedTurns[section],
-            maximumContentWidth: theme.metrics.maximumContentWidth,
-            sideInset: theme.metrics.pageInset
-        )
-        return header
+        heightForHeaderInSection section: Int
+    ) -> CGFloat {
+        .leastNormalMagnitude
+    }
+
+    public func tableView(
+        _ tableView: UITableView,
+        heightForRowAt indexPath: IndexPath
+    ) -> CGFloat {
+        if isMetadataRow(at: indexPath) { return metadataRowHeight }
+        return calculatedRowHeight(at: indexPath) ?? UITableView.automaticDimension
+    }
+
+    public func tableView(
+        _ tableView: UITableView,
+        estimatedHeightForRowAt indexPath: IndexPath
+    ) -> CGFloat {
+        if isMetadataRow(at: indexPath) { return metadataRowHeight }
+        return calculatedRowHeight(at: indexPath) ?? tableView.estimatedRowHeight
     }
 
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {

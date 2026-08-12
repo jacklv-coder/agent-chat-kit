@@ -40,6 +40,11 @@ history paging, and scroll policy on a traditional `UITableView`. Replace the co
 example above when the host prefers section/row updates and automatic row heights; keep the collection
 implementation when custom compositional layouts are required.
 
+The table timeline keeps one Turn per section for stable data updates, but does not render section
+headers. A dedicated metadata cell follows the Turn's final block: its time trails below user bubbles
+and leads below assistant or system content. A multi-block assistant reply therefore displays one
+time after the complete response region, including when its content uses a host renderer.
+
 The SDK page begins at the conversation boundary. The host still owns its sidebar or conversation
 list, selection and deep links, persistence, authentication, runtime construction, attachment bytes,
 URL policy, and image or artifact destinations.
@@ -101,9 +106,12 @@ requests coalesce while a model or height transaction is active. The detail stac
 in layout when expanded and is hidden when collapsed.
 
 The TableView implementation maps each turn to a section and each block to a row. Structural patches
-use explicit, non-animated `performBatchUpdates`; block revisions and disclosure changes reload only
-the affected rows with `.none`; parsed Markdown height changes use one empty self-sizing batch. Model,
-disclosure, and asynchronous height work still share one serialized update gate.
+use explicit `performBatchUpdates`. A user-triggered disclosure animates only its affected row. A true
+append at the latest edge commits its rows together, then follows the resolved bottom with one smooth
+scroll and a short self-sizing correction when needed. History prepends,
+off-screen arrivals while reading, block revisions, parsed Markdown height changes, and Reduce Motion
+remain non-animated. Model, disclosure, and asynchronous height work still share one serialized update
+gate.
 
 Do not reach into the collection view to manage offsets from the host. The controller preserves a
 stable block identifier and viewport-relative offset when older turns are prepended, and falls back to

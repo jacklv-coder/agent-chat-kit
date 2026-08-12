@@ -1116,6 +1116,7 @@ struct AgentTimelineBatchChanges {
     let insertedSections: IndexSet
     let deletedItems: [IndexPath]
     let insertedItems: [IndexPath]
+    let appendsAtEnd: Bool
 
     var hasChanges: Bool {
         !deletedSections.isEmpty || !insertedSections.isEmpty
@@ -1186,5 +1187,23 @@ struct AgentTimelineBatchChanges {
 
         self.deletedItems = deletedItems
         self.insertedItems = insertedItems
+        let hasInsertion = !insertedSections.isEmpty || !insertedItems.isEmpty
+        let existingTurnsAppendOnlyAtTail = previous.enumerated().allSatisfy {
+            section, previousTurn in
+            guard let updatedTurn = updatedByID[previousTurn.id] else { return false }
+            let previousBlockIDs = previousTurn.blocks.map(\.id)
+            let updatedBlockIDs = updatedTurn.blocks.map(\.id)
+            if section == previous.count - 1 {
+                return Array(updatedBlockIDs.prefix(previousBlockIDs.count))
+                    == previousBlockIDs
+            }
+            return updatedBlockIDs == previousBlockIDs
+        }
+        appendsAtEnd =
+            hasInsertion
+            && deletedSections.isEmpty
+            && deletedItems.isEmpty
+            && Array(updatedTurnIDs.prefix(previousTurnIDs.count)) == previousTurnIDs
+            && existingTurnsAppendOnlyAtTail
     }
 }

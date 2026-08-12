@@ -830,10 +830,258 @@ final class AgentTimelineTests: XCTestCase {
         )
 
         XCTAssertEqual(tableView.numberOfSections, 2)
-        XCTAssertEqual(tableView.numberOfRows(inSection: 0), 1)
-        XCTAssertEqual(tableView.numberOfRows(inSection: 1), 2)
+        XCTAssertEqual(tableView.numberOfRows(inSection: 0), 2)
+        XCTAssertEqual(tableView.numberOfRows(inSection: 1), 3)
+        XCTAssertLessThan(tableView.rectForHeader(inSection: 0).height, 1)
+
+        let userCell = try XCTUnwrap(
+            tableView.cellForRow(at: .init(row: 0, section: 0)) as? AgentTableBlockCell
+        )
+        let userMetadataCell = try XCTUnwrap(
+            tableView.cellForRow(at: .init(row: 1, section: 0))
+                as? AgentTableTurnMetadataCell
+        )
+        let answerCell = try XCTUnwrap(
+            tableView.cellForRow(at: .init(row: 1, section: 1)) as? AgentTableBlockCell
+        )
+        let assistantMetadataCell = try XCTUnwrap(
+            tableView.cellForRow(at: .init(row: 2, section: 1))
+                as? AgentTableTurnMetadataCell
+        )
+        let userTimestamp = try XCTUnwrap(
+            userMetadataCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentTurnTimestamp"
+            } as? UILabel
+        )
+        let answerTimestamp = try XCTUnwrap(
+            assistantMetadataCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentTurnTimestamp"
+            } as? UILabel
+        )
+        XCTAssertNil(
+            userCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentTurnTimestamp"
+            }
+        )
+        XCTAssertNil(
+            answerCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentTurnTimestamp"
+            }
+        )
+        XCTAssertEqual(
+            userTimestamp.text,
+            date.formatted(date: .omitted, time: .shortened)
+        )
+        XCTAssertEqual(answerTimestamp.text, userTimestamp.text)
+        XCTAssertGreaterThan(
+            userMetadataCell.convert(userTimestamp.bounds, from: userTimestamp).midX,
+            userMetadataCell.bounds.midX
+        )
+        XCTAssertLessThan(
+            assistantMetadataCell.convert(answerTimestamp.bounds, from: answerTimestamp).midX,
+            assistantMetadataCell.bounds.midX
+        )
+    }
+
+    func testTableTurnMetadataFollowsAHostRenderedCell() throws {
+        let date = Date(timeIntervalSince1970: 0)
+        let block = AgentBlock(
+            id: "host-table-block",
+            kind: "test.table.custom",
+            content: .custom(
+                .init(
+                    kind: "test.table.custom",
+                    payload: .object([:]),
+                    fallbackTitle: "Host-rendered content"
+                )
+            ),
+            state: .succeeded,
+            createdAt: date
+        )
+        let turn = AgentTurn(
+            id: "host-table-turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: date
+        )
+        let registry = AgentBlockRendererRegistry.default
+        registry.register(TableCustomRendererStub())
+        let controller = AgentTableConversationViewController(
+            store: .init(snapshot: .init(id: "host-table", turns: [turn])),
+            rendererRegistry: registry
+        )
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        tableView.layoutIfNeeded()
+
+        XCTAssertEqual(tableView.numberOfRows(inSection: 0), 2)
+        XCTAssertEqual(
+            tableView.cellForRow(at: .init(row: 0, section: 0))?.accessibilityIdentifier,
+            "HostTableCustomCell"
+        )
+        let metadataCell = try XCTUnwrap(
+            tableView.cellForRow(at: .init(row: 1, section: 0))
+                as? AgentTableTurnMetadataCell
+        )
+        let timestamp = try XCTUnwrap(
+            metadataCell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentTurnTimestamp"
+            } as? UILabel
+        )
+        XCTAssertEqual(timestamp.text, date.formatted(date: .omitted, time: .shortened))
+    }
+
+    func testTableMetadataRowTracksEmptyTurnBlockTransitions() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        let emptyTurn = AgentTurn(
+            id: "table-empty-transition-turn",
+            role: .assistant,
+            blocks: [],
+            state: .running,
+            createdAt: date
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(id: "table-empty-transition", turns: [emptyTurn])
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        XCTAssertEqual(tableView.numberOfRows(inSection: 0), 0)
+
+        let block = AgentBlock(
+            id: "table-empty-transition-block",
+            kind: .activity,
+            content: .activity(.init(title: "Started thinking")),
+            state: .running(progress: nil),
+            createdAt: date
+        )
+        var populatedSnapshot = store.snapshot
+        populatedSnapshot.turns[0].blocks = [block]
+        store.apply(
+            .init(
+                snapshot: populatedSnapshot,
+                patches: [
+                    .insertBlock(turnID: emptyTurn.id, blockID: block.id, index: 0)
+                ]
+            )
+        )
+
+        try await Task.sleep(for: .milliseconds(500))
+        tableView.layoutIfNeeded()
+        XCTAssertEqual(tableView.numberOfRows(inSection: 0), 2)
+        XCTAssertTrue(tableView.cellForRow(at: .init(row: 0, section: 0)) is AgentTableBlockCell)
         XCTAssertTrue(
-            tableView.cellForRow(at: .init(row: 0, section: 1)) is AgentTableBlockCell
+            tableView.cellForRow(at: .init(row: 1, section: 0))
+                is AgentTableTurnMetadataCell
+        )
+
+        var emptiedSnapshot = populatedSnapshot
+        emptiedSnapshot.turns[0].blocks = []
+        store.apply(
+            .init(
+                snapshot: emptiedSnapshot,
+                patches: [.deleteBlock(turnID: emptyTurn.id, blockID: block.id)]
+            )
+        )
+
+        try await Task.sleep(for: .milliseconds(200))
+        tableView.layoutIfNeeded()
+        XCTAssertEqual(tableView.numberOfRows(inSection: 0), 0)
+    }
+
+    func testTimelineBatchChangesClassifiesOnlyTailInsertionsAsAppends() throws {
+        let date = Date(timeIntervalSince1970: 0)
+        func block(_ id: String) -> AgentBlock {
+            AgentBlock(
+                id: .init(rawValue: id),
+                kind: .activity,
+                content: .activity(.init(title: id)),
+                state: .succeeded,
+                createdAt: date
+            )
+        }
+        func turn(_ id: String, blocks: [AgentBlock]) -> AgentTurn {
+            AgentTurn(
+                id: .init(rawValue: id),
+                role: .assistant,
+                blocks: blocks,
+                state: .completed,
+                createdAt: date
+            )
+        }
+
+        let first = turn("first", blocks: [block("first-block")])
+        let second = turn("second", blocks: [block("second-block")])
+        let appendedTurn = turn("third", blocks: [block("third-block")])
+        XCTAssertTrue(
+            try XCTUnwrap(
+                AgentTimelineBatchChanges(
+                    from: [first, second], to: [first, second, appendedTurn])
+            ).appendsAtEnd
+        )
+
+        let secondWithTailBlock = turn(
+            "second",
+            blocks: [block("second-block"), block("tail-block")]
+        )
+        XCTAssertTrue(
+            try XCTUnwrap(
+                AgentTimelineBatchChanges(
+                    from: [first, second],
+                    to: [first, secondWithTailBlock]
+                )
+            ).appendsAtEnd
+        )
+
+        let prepended = turn("older", blocks: [block("older-block")])
+        XCTAssertFalse(
+            try XCTUnwrap(
+                AgentTimelineBatchChanges(from: [first, second], to: [prepended, first, second])
+            ).appendsAtEnd
+        )
+
+        let firstWithMiddleBlock = turn(
+            "first",
+            blocks: [block("first-block"), block("middle-block")]
+        )
+        XCTAssertFalse(
+            try XCTUnwrap(
+                AgentTimelineBatchChanges(
+                    from: [first, second],
+                    to: [firstWithMiddleBlock, second]
+                )
+            ).appendsAtEnd
+        )
+
+        let emptyLastTurn = turn("empty-last", blocks: [])
+        XCTAssertFalse(
+            try XCTUnwrap(
+                AgentTimelineBatchChanges(
+                    from: [first, emptyLastTurn],
+                    to: [firstWithMiddleBlock, emptyLastTurn]
+                )
+            ).appendsAtEnd
+        )
+
+        let populatedLastTurn = turn("empty-last", blocks: [block("new-tail-block")])
+        XCTAssertTrue(
+            try XCTUnwrap(
+                AgentTimelineBatchChanges(
+                    from: [first, emptyLastTurn],
+                    to: [first, populatedLastTurn]
+                )
+            ).appendsAtEnd
         )
     }
 
@@ -905,7 +1153,7 @@ final class AgentTimelineTests: XCTestCase {
             )
         )
 
-        try await Task.sleep(for: .milliseconds(250))
+        try await Task.sleep(for: .milliseconds(500))
         if let cell = tableView.cellForRow(
             at: .init(row: 0, section: initialTurns.count)
         ) as? AgentTableBlockCell {
@@ -922,6 +1170,118 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertNotNil(
             tableView.cellForRow(at: .init(row: 0, section: initialTurns.count))
         )
+    }
+
+    func testTableControllerSmoothlyFollowsBatchInsertionAtBottom() async throws {
+        let date = Date(timeIntervalSince1970: 0)
+        func turn(_ index: Int) -> AgentTurn {
+            AgentTurn(
+                id: .init(rawValue: "table-batch-turn-\(index)"),
+                role: .user,
+                blocks: [
+                    AgentBlock(
+                        id: .init(rawValue: "table-batch-block-\(index)"),
+                        kind: .userText,
+                        content: .userText(.init(text: "Batch message \(index + 1)")),
+                        state: .succeeded,
+                        createdAt: date
+                    )
+                ],
+                state: .completed,
+                createdAt: date
+            )
+        }
+
+        let initialTurns = (0..<18).map(turn)
+        let store = AgentConversationStore(
+            snapshot: .init(id: "table-batch-insertion", turns: initialTurns)
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        tableView.layoutIfNeeded()
+
+        let insertedTurns = (18..<26).map(turn)
+        var updated = store.snapshot
+        updated.turns.append(contentsOf: insertedTurns)
+        var visualOffsets = [
+            tableView.layer.presentation()?.bounds.origin.y ?? tableView.bounds.origin.y
+        ]
+        var contentHeights = [tableView.contentSize.height]
+        store.apply(
+            .init(
+                snapshot: updated,
+                patches: insertedTurns.enumerated().map { offset, turn in
+                    .insertTurn(turn.id, index: initialTurns.count + offset)
+                }
+            )
+        )
+
+        for _ in 0..<45 {
+            try await Task.sleep(for: .milliseconds(16))
+            visualOffsets.append(
+                tableView.layer.presentation()?.bounds.origin.y ?? tableView.bounds.origin.y
+            )
+            contentHeights.append(tableView.contentSize.height)
+        }
+        tableView.layoutIfNeeded()
+
+        let visibleBottom =
+            tableView.contentOffset.y + tableView.bounds.height
+            - tableView.adjustedContentInset.bottom
+        XCTAssertEqual(tableView.numberOfSections, 26)
+        XCTAssertEqual(
+            max(0, tableView.contentSize.height - visibleBottom),
+            0,
+            accuracy: 1,
+            "Offsets: \(visualOffsets); heights: \(contentHeights); model: \(tableView.contentOffset.y)"
+        )
+
+        let visualSteps = zip(visualOffsets, visualOffsets.dropFirst()).map { $1 - $0 }
+        XCTAssertFalse(
+            visualSteps.contains { $0 < -1 },
+            "Offsets: \(visualOffsets); heights: \(contentHeights)"
+        )
+        let traveledDistance = max(1, (visualOffsets.last ?? 0) - (visualOffsets.first ?? 0))
+        XCTAssertLessThanOrEqual(
+            visualSteps.max() ?? 0,
+            max(80, traveledDistance * 0.3),
+            "Offsets: \(visualOffsets); heights: \(contentHeights)"
+        )
+
+        let interruptedTurns = (26..<34).map(turn)
+        updated.turns.append(contentsOf: interruptedTurns)
+        store.apply(
+            .init(
+                snapshot: updated,
+                patches: interruptedTurns.enumerated().map { offset, turn in
+                    .insertTurn(turn.id, index: 26 + offset)
+                }
+            )
+        )
+        try await Task.sleep(for: .milliseconds(100))
+        controller.scrollViewWillBeginDragging(tableView)
+        let readingOffset = max(
+            -tableView.adjustedContentInset.top,
+            tableView.contentOffset.y - 180
+        )
+        tableView.setContentOffset(
+            CGPoint(x: tableView.contentOffset.x, y: readingOffset),
+            animated: false
+        )
+        try await Task.sleep(for: .milliseconds(500))
+
+        XCTAssertEqual(tableView.numberOfSections, 34)
+        XCTAssertEqual(tableView.contentOffset.y, readingOffset, accuracy: 8)
+        let interruptedVisibleBottom =
+            tableView.contentOffset.y + tableView.bounds.height
+            - tableView.adjustedContentInset.bottom
+        XCTAssertGreaterThan(tableView.contentSize.height - interruptedVisibleBottom, 100)
     }
 
     func testTableControllerSerializesExpansionWithStructuralInsertion() async throws {
@@ -986,7 +1346,7 @@ final class AgentTimelineTests: XCTestCase {
             .init(snapshot: updated, patches: [.insertTurn(insertedTurn.id, index: 1)])
         )
 
-        try await Task.sleep(for: .milliseconds(250))
+        try await Task.sleep(for: .milliseconds(700))
         controller.view.layoutIfNeeded()
         tableView.layoutIfNeeded()
 
@@ -1782,6 +2142,65 @@ final class AgentTimelineTests: XCTestCase {
         XCTAssertNil(cache.height(for: three))
     }
 
+    func testTableTextRowsUseCalculatedHeightsAndLightweightLabels() throws {
+        let date = Date(timeIntervalSince1970: 0)
+        let turns = [
+            AgentTurn(
+                id: "calculated-user-turn",
+                role: .user,
+                blocks: [
+                    AgentBlock(
+                        id: "calculated-user",
+                        kind: .userText,
+                        content: .userText(.init(text: "A lightweight user message")),
+                        state: .succeeded,
+                        createdAt: date
+                    )
+                ],
+                state: .completed,
+                createdAt: date
+            ),
+            AgentTurn(
+                id: "calculated-markdown-turn",
+                role: .assistant,
+                blocks: [
+                    AgentBlock(
+                        id: "calculated-markdown",
+                        kind: .markdown,
+                        content: .markdown(
+                            .init(markdown: "A **simple** Markdown paragraph.", isFinal: true)
+                        ),
+                        state: .succeeded,
+                        createdAt: date
+                    )
+                ],
+                state: .completed,
+                createdAt: date
+            ),
+        ]
+        let store = AgentConversationStore(
+            snapshot: .init(id: "calculated-heights", turns: turns)
+        )
+        let controller = AgentTableConversationViewController(store: store)
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 390, height: 844))
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        controller.view.layoutIfNeeded()
+        let tableView = try XCTUnwrap(
+            controller.view.allSubviews.compactMap { $0 as? UITableView }.first
+        )
+        tableView.layoutIfNeeded()
+
+        for path in [IndexPath(row: 0, section: 0), IndexPath(row: 0, section: 1)] {
+            let height = controller.tableView(tableView, heightForRowAt: path)
+            XCTAssertNotEqual(height, UITableView.automaticDimension)
+            XCTAssertEqual(tableView.rectForRow(at: path).height, height, accuracy: 1)
+            let cell = try XCTUnwrap(tableView.cellForRow(at: path) as? AgentTableBlockCell)
+            XCTAssertTrue(cell.contentView.allSubviews.contains { $0 is UILabel })
+            XCTAssertFalse(cell.contentView.allSubviews.contains { $0 is UITextView })
+        }
+    }
+
     func testUpdateSchedulerCoalescesBlockRevisions() async {
         let expectation = expectation(description: "flush")
         var received: AgentScheduledUpdate?
@@ -1993,6 +2412,37 @@ final class AgentTimelineTests: XCTestCase {
             imageProvider: imageProvider,
             actionSink: actionSink
         )
+    }
+}
+
+@MainActor
+private final class TableCustomRendererStub: AgentTableBlockRenderer {
+    let supportedKinds: Set<AgentBlockKind> = ["test.table.custom"]
+
+    func register(in collectionView: UICollectionView) {
+        collectionView.register(UICollectionViewCell.self, forCellWithReuseIdentifier: "custom")
+    }
+
+    func dequeueConfiguredCell(
+        from collectionView: UICollectionView,
+        at indexPath: IndexPath,
+        context: AgentBlockRenderContext
+    ) -> UICollectionViewCell {
+        collectionView.dequeueReusableCell(withReuseIdentifier: "custom", for: indexPath)
+    }
+
+    func register(in tableView: UITableView) {
+        tableView.register(UITableViewCell.self, forCellReuseIdentifier: "custom")
+    }
+
+    func dequeueConfiguredCell(
+        from tableView: UITableView,
+        at indexPath: IndexPath,
+        context: AgentBlockRenderContext
+    ) -> UITableViewCell {
+        let cell = tableView.dequeueReusableCell(withIdentifier: "custom", for: indexPath)
+        cell.accessibilityIdentifier = "HostTableCustomCell"
+        return cell
     }
 }
 

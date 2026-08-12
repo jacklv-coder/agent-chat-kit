@@ -141,6 +141,13 @@ public protocol AgentTableBlockRenderer: AgentBlockRenderer {
     ) -> UITableViewCell
 }
 
+/// Internal sizing hook used by the table timeline to calculate and cache a row before display.
+/// Custom renderers that do not adopt it continue to use UITableView self-sizing.
+@MainActor
+protocol AgentTableBlockLayoutProviding: AnyObject {
+    func tableRowHeight(for context: AgentBlockRenderContext) -> CGFloat
+}
+
 /// A scene-local registry that falls back safely for unknown and mismatched blocks.
 @MainActor
 public final class AgentBlockRendererRegistry {

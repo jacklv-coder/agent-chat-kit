@@ -44,6 +44,9 @@ code, tests, demo path, and documentation are present.
 - [x] Bounded, appearance-sensitive `AgentItemSizeCache`
 - [x] Jump to Latest and unread tracking
 - [x] Streaming-aware follow policy with direct-manipulation cooldown and deterministic tests
+- [x] Optional native `UITableView` timeline with batched tail insertion, smooth bottom following,
+  interruptible scrolling, and deterministic regression coverage
+- [x] Table Turn metadata rendered as a content-adjacent cell instead of section headers
 - [ ] Physical-device 2pt drift and sustained-streaming acceptance benchmarks
 
 ## Phase 4 — Markdown (in progress)

@@ -19,6 +19,7 @@ enum DemoScenario: String, CaseIterable {
     case interrupt = "Interrupt"
     case offlineAndReconnect = "Offline and Reconnect"
     case historyPagination = "History Pagination"
+    case bottomBatchInsertion = "Bottom Batch Insertion"
     case unknownToolFallback = "Unknown Tool Fallback"
     case customRenderer = "Custom Renderer"
     case longConversation = "Long Conversation"
@@ -59,6 +60,7 @@ enum DemoScenario: String, CaseIterable {
         case .interrupt: "Running state and Stop command"
         case .offlineAndReconnect: "Retained content with connection banner"
         case .historyPagination: "Earlier-history cursor and prepended turns"
+        case .bottomBatchInsertion: "Eight fixed-height messages inserted in one bottom batch"
         case .unknownToolFallback: "Safe generic custom-block fallback"
         case .customRenderer: "Host renderer for demo.weather"
         case .longConversation: "100 turns for quick scrolling checks"
@@ -76,6 +78,8 @@ enum DemoScenario: String, CaseIterable {
             return approvalScenario()
         case .offlineAndReconnect:
             return reconnectScenario()
+        case .bottomBatchInsertion:
+            return bottomBatchInsertionScenario()
         default:
             let event = runtimeEvent(
                 sequence: 1,
@@ -110,6 +114,7 @@ enum DemoScenario: String, CaseIterable {
         case .approval, .failureAndRetry, .interrupt, .offlineAndReconnect:
             ["lifecycle", "interaction"]
         case .historyPagination, .longConversation: ["scrolling", "history"]
+        case .bottomBatchInsertion: ["scrolling", "batch", "insertion"]
         case .iPadStageManager: ["ipad", "layout"]
         case .accessibility: ["accessibility"]
         case .unknownToolFallback, .customRenderer: ["custom", "tool"]
@@ -230,6 +235,55 @@ enum DemoScenario: String, CaseIterable {
         return .init(events: events)
     }
 
+    private func bottomBatchInsertionScenario() -> AgentScenario {
+        let date = Date(timeIntervalSince1970: 0)
+        let initialTurns = (0..<18).map {
+            batchMessageTurn(index: $0, phase: "Initial", date: date)
+        }
+        let initialSnapshot = AgentConversationSnapshot(
+            id: conversationID,
+            title: rawValue,
+            turns: initialTurns,
+            state: .connected
+        )
+        var events = [
+            AgentScenarioEvent(
+                event: runtimeEvent(sequence: 1, payload: .snapshot(initialSnapshot)),
+                delayNanoseconds: 20_000_000
+            )
+        ]
+        events.append(
+            contentsOf: (0..<8).map { index in
+                AgentScenarioEvent(
+                    event: runtimeEvent(
+                        sequence: Int64(index + 2),
+                        payload: .turnInserted(
+                            batchMessageTurn(index: index, phase: "Batch", date: date)
+                        )
+                    ),
+                    delayNanoseconds: index == 0 ? 2_000_000_000 : 2_000_000
+                )
+            }
+        )
+        return .init(events: events)
+    }
+
+    private func batchMessageTurn(index: Int, phase: String, date: Date) -> AgentTurn {
+        let identifier = "\(phase.lowercased())-batch-message-\(index)"
+        return AgentTurn(
+            id: .init(rawValue: "\(identifier)-turn"),
+            role: .user,
+            blocks: [
+                block(
+                    id: .init(rawValue: "\(identifier)-block"),
+                    content: .userText(.init(text: "\(phase) message \(index + 1)"))
+                )
+            ],
+            state: .completed,
+            createdAt: date.addingTimeInterval(Double(index))
+        )
+    }
+
     private func snapshot() -> AgentConversationSnapshot {
         let date = Date(timeIntervalSince1970: 0)
         if self == .completeConversation {
@@ -306,6 +360,8 @@ enum DemoScenario: String, CaseIterable {
                     ]
                 )
             ]
+        case .bottomBatchInsertion:
+            []
         case .markdownShowcase:
             [
                 block(

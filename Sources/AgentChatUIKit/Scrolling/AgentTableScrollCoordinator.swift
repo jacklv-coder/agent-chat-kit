@@ -12,6 +12,8 @@ final class AgentTableScrollCoordinator {
     private var isStreaming = false
     private var isUserInteracting = false
     private var userInteractionCooldownUntil: Date?
+    private var latestAnimator: UIViewPropertyAnimator?
+    private var latestAnimationCompletion: ((Bool) -> Void)?
 
     private(set) var mode: AgentScrollMode = .followingLatest
     private(set) var unreadCount = 0
@@ -48,6 +50,7 @@ final class AgentTableScrollCoordinator {
         isUserInteracting = true
         userInteractionCooldownUntil = nil
         mode = .userInteracting
+        cancelLatestAnimationPreservingVisualOffset()
     }
 
     func userDidScroll() {
@@ -81,14 +84,18 @@ final class AgentTableScrollCoordinator {
     func captureAnchor(edge: AgentLayoutAnchor.Edge) -> AgentLayoutAnchor? {
         guard let tableView else { return nil }
         tableView.layoutIfNeeded()
-        let visible = (tableView.indexPathsForVisibleRows ?? []).sorted {
-            tableView.rectForRow(at: $0).minY < tableView.rectForRow(at: $1).minY
-        }
-        guard let selected = edge == .top ? visible.first : visible.last,
-            let blockID = rowIdentifier(selected)
-        else { return nil }
+        let visible = (tableView.indexPathsForVisibleRows ?? [])
+            .compactMap { path -> (path: IndexPath, blockID: AgentBlockID)? in
+                guard let blockID = rowIdentifier(path) else { return nil }
+                return (path, blockID)
+            }
+            .sorted {
+                tableView.rectForRow(at: $0.path).minY
+                    < tableView.rectForRow(at: $1.path).minY
+            }
+        guard let selected = edge == .top ? visible.first : visible.last else { return nil }
 
-        let rowFrame = tableView.rectForRow(at: selected)
+        let rowFrame = tableView.rectForRow(at: selected.path)
         let viewportOffset: CGFloat
         switch edge {
         case .top:
@@ -100,9 +107,9 @@ final class AgentTableScrollCoordinator {
                 - tableView.adjustedContentInset.bottom
             viewportOffset = rowFrame.maxY - viewportBottom
         }
-        rememberFallbacks(around: blockID)
+        rememberFallbacks(around: selected.blockID)
         return AgentLayoutAnchor(
-            blockID: blockID,
+            blockID: selected.blockID,
             edge: edge,
             viewportOffset: viewportOffset
         )
@@ -140,7 +147,7 @@ final class AgentTableScrollCoordinator {
         didChangeUnreadCount?(unreadCount)
     }
 
-    func scrollToLatest() {
+    func scrollToLatest(animated: Bool = false) {
         guard let tableView else { return }
         isUserInteracting = false
         userInteractionCooldownUntil = nil
@@ -149,8 +156,54 @@ final class AgentTableScrollCoordinator {
         tableView.layoutIfNeeded()
         tableView.setContentOffset(
             CGPoint(x: tableView.contentOffset.x, y: latestOffset(in: tableView)),
-            animated: false
+            animated: animated
         )
+    }
+
+    func animateToLatest(
+        duration: TimeInterval = 0.25,
+        completion: @escaping (Bool) -> Void
+    ) {
+        guard let tableView, shouldAutomaticallyFollowLatest else {
+            completion(false)
+            return
+        }
+        clearUnread()
+        tableView.layoutIfNeeded()
+        let target = CGPoint(x: tableView.contentOffset.x, y: latestOffset(in: tableView))
+        let lastPath = orderedBlockIDs().last.flatMap(indexPath)
+        guard abs(target.y - tableView.contentOffset.y) > 0.5 else {
+            tableView.setContentOffset(target, animated: false)
+            completion(true)
+            return
+        }
+        let animator = UIViewPropertyAnimator(duration: duration, curve: .easeOut) {
+            if let lastPath {
+                tableView.scrollToRow(at: lastPath, at: .bottom, animated: false)
+                tableView.layoutIfNeeded()
+                tableView.setContentOffset(
+                    CGPoint(
+                        x: tableView.contentOffset.x,
+                        y: self.latestOffset(in: tableView)
+                    ),
+                    animated: false
+                )
+            } else {
+                tableView.setContentOffset(target, animated: false)
+            }
+            tableView.layoutIfNeeded()
+        }
+        animator.isUserInteractionEnabled = true
+        animator.addCompletion { [weak self, weak animator] position in
+            guard let self, let animator, self.latestAnimator === animator else { return }
+            self.latestAnimator = nil
+            let completion = self.latestAnimationCompletion
+            self.latestAnimationCompletion = nil
+            completion?(position == .end)
+        }
+        latestAnimator = animator
+        latestAnimationCompletion = completion
+        animator.startAnimation()
     }
 
     private var isFollowingLatest: Bool {
@@ -182,6 +235,27 @@ final class AgentTableScrollCoordinator {
         let minimum = -tableView.adjustedContentInset.top
         let maximum = latestOffset(in: tableView)
         return min(maximum, max(minimum, y))
+    }
+
+    private func cancelLatestAnimationPreservingVisualOffset() {
+        guard let tableView, let animator = latestAnimator else { return }
+        let visibleOffset = tableView.layer.presentation()?.bounds.origin
+        latestAnimator = nil
+        let completion = latestAnimationCompletion
+        latestAnimationCompletion = nil
+        animator.stopAnimation(true)
+        tableView.layer.removeAllAnimations()
+        if let visibleOffset {
+            tableView.setContentOffset(
+                CGPoint(
+                    x: tableView.contentOffset.x,
+                    y: clampedOffset(visibleOffset.y, in: tableView)
+                ),
+                animated: false
+            )
+        }
+        tableView.layoutIfNeeded()
+        completion?(false)
     }
 
     private func rememberFallbacks(around blockID: AgentBlockID) {

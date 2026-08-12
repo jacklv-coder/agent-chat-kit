@@ -9,6 +9,12 @@ public actor AgentMarkdownParser {
 
     /// Parses complete or temporarily incomplete Markdown without executing HTML.
     public func parse(_ source: String) -> AgentMarkdownRenderDocument {
+        parseImmediately(source)
+    }
+
+    /// Parses a complete source synchronously for presentation pipelines that already run before
+    /// display. Streaming callers should continue to use ``parseStreaming(_:isFinal:debounceMilliseconds:)``.
+    public nonisolated func parseImmediately(_ source: String) -> AgentMarkdownRenderDocument {
         let document = Document(parsing: source)
         return AgentMarkdownRenderDocument(blocks: convertBlocks(document.children))
     }
@@ -24,14 +30,14 @@ public actor AgentMarkdownParser {
             try await Task.sleep(nanoseconds: UInt64(milliseconds) * 1_000_000)
             try Task.checkCancellation()
         }
-        return parse(source)
+        return parseImmediately(source)
     }
 
-    private func convertBlocks(_ children: MarkupChildren) -> [AgentMarkdownRenderBlock] {
+    private nonisolated func convertBlocks(_ children: MarkupChildren) -> [AgentMarkdownRenderBlock] {
         children.flatMap { convertBlock($0) }
     }
 
-    private func convertBlock(_ markup: any Markup) -> [AgentMarkdownRenderBlock] {
+    private nonisolated func convertBlock(_ markup: any Markup) -> [AgentMarkdownRenderBlock] {
         if let paragraph = markup as? Paragraph {
             let content = convertInlines(paragraph.children)
             if content.count == 1, case .image(let source, let alternativeText) = content[0] {
@@ -71,7 +77,7 @@ public actor AgentMarkdownParser {
         return [.unsupported(raw: markup.format())]
     }
 
-    private func convertListItem(_ markup: any Markup) -> AgentMarkdownListItem? {
+    private nonisolated func convertListItem(_ markup: any Markup) -> AgentMarkdownListItem? {
         guard let item = markup as? ListItem else { return nil }
         let checked: Bool?
         switch item.checkbox {
@@ -82,7 +88,7 @@ public actor AgentMarkdownParser {
         return .init(isChecked: checked, blocks: convertBlocks(item.children))
     }
 
-    private func convertTable(_ table: Table) -> AgentMarkdownTable {
+    private nonisolated func convertTable(_ table: Table) -> AgentMarkdownTable {
         let header = table.head.children.compactMap { cell -> [AgentMarkdownInline]? in
             guard let cell = cell as? Table.Cell else { return nil }
             return convertInlines(cell.children)
@@ -105,11 +111,11 @@ public actor AgentMarkdownParser {
         return .init(header: header, rows: rows, alignments: alignments)
     }
 
-    private func convertInlines(_ children: MarkupChildren) -> [AgentMarkdownInline] {
+    private nonisolated func convertInlines(_ children: MarkupChildren) -> [AgentMarkdownInline] {
         children.map(convertInline)
     }
 
-    private func convertInline(_ markup: any Markup) -> AgentMarkdownInline {
+    private nonisolated func convertInline(_ markup: any Markup) -> AgentMarkdownInline {
         if let text = markup as? Text { return .text(text.string) }
         if let emphasis = markup as? Emphasis {
             return .emphasis(convertInlines(emphasis.children))
@@ -138,7 +144,7 @@ public actor AgentMarkdownParser {
         return .unsupported(markup.format())
     }
 
-    private func plainText(_ children: MarkupChildren) -> String {
+    private nonisolated func plainText(_ children: MarkupChildren) -> String {
         children.map { markup in
             if let text = markup as? Text { return text.string }
             if let code = markup as? InlineCode { return code.code }

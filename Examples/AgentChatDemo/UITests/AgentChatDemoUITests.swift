@@ -85,8 +85,77 @@ final class AgentChatDemoUITests: XCTestCase {
 
         header.tap()
 
-        XCTAssertTrue(app.descendants(matching: .any)["AgentActivityEventDetails"].exists)
+        XCTAssertTrue(
+            app.descendants(matching: .any)["AgentActivityEventDetails"]
+                .waitForExistence(timeout: 2)
+        )
         XCTAssertEqual(header.value as? String, "Collapse")
+    }
+
+    func testTableTimelineExpandsToolAndAppendsComposerResponse() {
+        continueAfterFailure = false
+        let app = makeApp(scenario: "shell-command")
+        app.launch()
+
+        let lab = app.buttons["AgentChatDemoTestLab"]
+        XCTAssertTrue(lab.waitForExistence(timeout: 10))
+        lab.tap()
+        let openTable = app.buttons["Open TableView Version"]
+        XCTAssertTrue(openTable.waitForExistence(timeout: 5))
+        openTable.tap()
+
+        let timeline = app.tables["AgentTableConversationTimeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 10))
+        let header = app.buttons["AgentActivityEventHeader"]
+        XCTAssertTrue(header.waitForExistence(timeout: 10))
+        XCTAssertEqual(header.value as? String, "Expand")
+
+        header.tap()
+
+        expectation(
+            for: NSPredicate(format: "value == %@", "Collapse"),
+            evaluatedWith: header
+        )
+        waitForExpectations(timeout: 2)
+        XCTAssertEqual(header.value as? String, "Collapse")
+        XCTAssertTrue(app.staticTexts["Output"].exists)
+
+        let editor = app.textViews["AgentComposerTextView"]
+        editor.tap()
+        editor.typeText("Animate a response at the bottom")
+        app.buttons["AgentComposerSendButton"].tap()
+
+        let response = app.staticTexts["Demo 实时响应"]
+        XCTAssertTrue(response.waitForExistence(timeout: 15))
+    }
+
+    func testTableTimelineBatchInsertsMessagesAtBottom() {
+        continueAfterFailure = false
+        let app = makeApp(
+            scenario: "bottom-batch-insertion",
+            playbackMode: "realtime"
+        )
+        app.launchEnvironment["AGENTCHAT_TIMELINE"] = "table"
+        app.launch()
+
+        let timeline = app.tables["AgentTableConversationTimeline"]
+        XCTAssertTrue(timeline.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["Initial message 18"].waitForExistence(timeout: 5))
+
+        let lastInsertedMessage = app.staticTexts["Batch message 8"]
+        XCTAssertTrue(lastInsertedMessage.waitForExistence(timeout: 6))
+        let timelineFrame = timeline.frame
+        let visibleInsideTimeline = NSPredicate { object, _ in
+            guard let element = object as? XCUIElement else { return false }
+            return element.frame.intersects(timelineFrame)
+                && element.frame.maxY <= timelineFrame.maxY + 1
+        }
+        expectation(
+            for: visibleInsideTimeline,
+            evaluatedWith: lastInsertedMessage
+        )
+        waitForExpectations(timeout: 3)
+        XCTAssertTrue(app.staticTexts["Batch message 7"].exists)
     }
 
     func testFailedCapsuleCanRetryToSuccess() {

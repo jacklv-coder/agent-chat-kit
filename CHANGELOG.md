@@ -25,3 +25,7 @@ All notable changes are documented here. This project follows Semantic Versionin
   status, and explicit Send/Stop behavior.
 - Disabled submission while disconnected by default and preserved drafts when runtime submission
   fails.
+- Added interruptible, smoothly animated bottom-batch insertion to the native table timeline, with
+  a dedicated Test Lab scenario and regression coverage.
+- Moved table-timeline timestamps from section headers into a final cell for each Turn, aligned
+  beneath the corresponding user bubble or assistant response region.
