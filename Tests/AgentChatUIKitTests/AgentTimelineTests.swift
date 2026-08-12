@@ -1343,6 +1343,7 @@ final class AgentTimelineTests: XCTestCase {
         var visualOffsets = [
             tableView.layer.presentation()?.bounds.origin.y ?? tableView.bounds.origin.y
         ]
+        var sampleTimes = [CACurrentMediaTime()]
         var contentHeights = [tableView.contentSize.height]
         store.apply(
             .init(
@@ -1358,6 +1359,7 @@ final class AgentTimelineTests: XCTestCase {
             visualOffsets.append(
                 tableView.layer.presentation()?.bounds.origin.y ?? tableView.bounds.origin.y
             )
+            sampleTimes.append(CACurrentMediaTime())
             contentHeights.append(tableView.contentSize.height)
         }
         tableView.layoutIfNeeded()
@@ -1378,11 +1380,29 @@ final class AgentTimelineTests: XCTestCase {
             visualSteps.contains { $0 < -1 },
             "Offsets: \(visualOffsets); heights: \(contentHeights)"
         )
-        let traveledDistance = max(1, (visualOffsets.last ?? 0) - (visualOffsets.first ?? 0))
-        XCTAssertLessThanOrEqual(
-            visualSteps.max() ?? 0,
-            max(80, traveledDistance * 0.3),
-            "Offsets: \(visualOffsets); heights: \(contentHeights)"
+        let firstOffset = visualOffsets.first ?? 0
+        let finalOffset = visualOffsets.last ?? firstOffset
+        let traveledDistance = max(1, finalOffset - firstOffset)
+        let sampleIntervals = zip(sampleTimes, sampleTimes.dropFirst()).map { $1 - $0 }
+        let excessiveSteps = zip(visualSteps, sampleIntervals).filter { step, interval in
+            let elapsedProgress = min(1, interval / 0.25)
+            let allowedStep = max(80, traveledDistance * elapsedProgress * 2.5 + 16)
+            return step > allowedStep
+        }
+        XCTAssertTrue(
+            excessiveSteps.isEmpty,
+            "Offsets: \(visualOffsets); sample times: \(sampleTimes); heights: \(contentHeights)"
+        )
+        let intermediateOffsets = Set(
+            visualOffsets
+                .filter { $0 > firstOffset + 1 && $0 < finalOffset - 1 }
+                .map { Int($0.rounded()) }
+        )
+        XCTAssertGreaterThanOrEqual(
+            intermediateOffsets.count,
+            2,
+            "Expected multiple presentation-layer frames; offsets: \(visualOffsets); "
+                + "heights: \(contentHeights)"
         )
 
         let interruptedTurns = (26..<34).map(turn)
