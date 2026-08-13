@@ -22,6 +22,8 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Changed
 
+- Reorganized the Demo into Chats and Test Lab tabs. Chats now starts from a recent-conversation
+  list and pushes the production `UITableView` timeline for interactive message testing.
 - Rebuilt the composer as a host-extensible multiline surface with attachment upload states,
   retry/removal, paste and document import routing, model/reasoning/workspace accessories, context
   status, and explicit Send/Stop behavior.

@@ -23,17 +23,52 @@ final class AgentChatDemoUITests: XCTestCase {
             .firstMatch
     }
 
-    func testDefaultLaunchOpensCompleteConversationExperience() {
+    func testDefaultLaunchShowsTabsAndOpensTableConversation() {
         continueAfterFailure = false
         let app = makeDefaultApp()
         app.launch()
 
-        XCTAssertTrue(app.navigationBars["Complete Conversation"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.tabBars.buttons["Chats"].waitForExistence(timeout: 10))
+        let testLab = app.tabBars.buttons["Test Lab"]
+        XCTAssertTrue(testLab.exists)
+        XCTAssertTrue(app.navigationBars["Conversations"].exists)
+        XCTAssertTrue(app.tables["AgentChatDemoConversationList"].exists)
+
+        testLab.tap()
+        XCTAssertTrue(app.tables["AgentChatDemoScenarioList"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.cells["AgentChatDemoScenario.complete-cell-showcase"].exists)
+        app.tabBars.buttons["Chats"].tap()
+
+        let conversation = app.cells["AgentChatDemoConversation.complete-conversation"]
+        XCTAssertTrue(conversation.exists)
+        conversation.tap()
+
+        XCTAssertTrue(
+            app.navigationBars["Complete Conversation · TableView"]
+                .waitForExistence(timeout: 10)
+        )
+        XCTAssertTrue(app.tables["AgentTableConversationTimeline"].waitForExistence(timeout: 10))
+        let editor = app.textViews["AgentComposerTextView"]
+        XCTAssertTrue(editor.exists)
+        XCTAssertTrue(app.buttons["AgentChatDemoTestLab"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Chats"].exists)
+
+        editor.tap()
+        editor.typeText("Run the complete table conversation demo")
+        app.buttons["AgentComposerSendButton"].tap()
+        XCTAssertTrue(
+            contentElement(containing: "Demo 实时响应", in: app)
+                .waitForExistence(timeout: 15)
+        )
+
+        app.buttons["AgentChatDemoTestLab"].tap()
+        let openCollection = app.buttons["Open CollectionView Version"]
+        XCTAssertTrue(openCollection.waitForExistence(timeout: 5))
+        openCollection.tap()
         XCTAssertTrue(
             app.collectionViews["AgentConversationTimeline"].waitForExistence(timeout: 10)
         )
-        XCTAssertTrue(app.textViews["AgentComposerTextView"].exists)
-        XCTAssertTrue(app.buttons["AgentChatDemoTestLab"].exists)
+        XCTAssertFalse(app.tabBars.buttons["Chats"].exists)
     }
 
     func testComposerAcceptsTouchInputAndStreamsAResponse() {

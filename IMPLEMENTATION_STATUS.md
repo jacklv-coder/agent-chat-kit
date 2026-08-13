@@ -71,7 +71,8 @@ code, tests, demo path, and documentation are present.
 - [x] Rich composer attachment upload/retry/removal, host accessories, file paste/import routing,
   context status, and offline draft preservation
 - [x] Interactive Mock Runtime submit flow with thinking, tools, and streaming Markdown results
-- [x] Complete conversation Demo is the default launch; isolated renderer scenarios remain in Test Lab
+- [x] Tab-based Demo with a conversation-list first tab, UITableView chat details, and a dedicated
+  Test Lab tab
 - [x] State-aware Test Lab playback plus replay, paused reset, step, and one-tap sample response
 - [x] Whole-row tool disclosure with icon/title/detail structure and animated height changes
 - [x] `keyboardLayoutGuide`, interactive dismissal, and hardware key commands

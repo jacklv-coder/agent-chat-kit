@@ -89,11 +89,12 @@ xcodebuild -project AgentChatDemo.xcodeproj -scheme AgentChatDemo \
   -destination 'platform=iOS Simulator,name=iPhone 16' build
 ```
 
-The Demo opens on **Complete Conversation**, a production-shaped message-list page with recent
-history, cursor pagination, user and assistant turns, tool activity, Markdown, a working composer,
-and a deterministic streamed response. The Test Lab remains available from the navigation menu and
-contains all normative scenarios, including a complete cell showcase and a current-conversation
-replay for checking realistic Chinese Markdown, tables, trees, long-message layout, and sanitized
+The Demo uses a production-shaped tab architecture. **Chats** opens a recent-conversation list; each
+row pushes a native `UITableView` message page with cursor pagination, user and assistant turns,
+tool activity, Markdown, a working composer, and deterministic streamed responses. **Test Lab** is
+the second tab and contains all normative scenarios, including a complete cell showcase and a
+current-conversation replay for checking realistic Chinese Markdown, tables, trees,
+long-message layout, and sanitized
 tool activity for commands, image inspection, file edits, skills, and host integrations. Tool
 activity uses compact icon-and-summary rows with whole-row expandable details and immediate
 self-sizing height updates. Expanded image activity resolves a thumbnail through the injected

@@ -12,7 +12,6 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
         guard let windowScene = scene as? UIWindowScene else { return }
         let window = UIWindow(windowScene: windowScene)
         let process = ProcessInfo.processInfo
-        let rootController: UIViewController
         if process.arguments.contains("--agentchat-uitest") {
             let identifier =
                 process.environment["AGENTCHAT_SCENARIO"]
@@ -31,17 +30,15 @@ final class SceneDelegate: UIResponder, UIWindowSceneDelegate {
                 process.environment["AGENTCHAT_TIMELINE"] == "table"
                 ? .tableView
                 : .collectionView
-            rootController = DemoConversationContainerViewController(
+            let rootController = DemoConversationContainerViewController(
                 scenario: scenario,
                 playbackController: playback,
                 timelineImplementation: timeline
             )
+            window.rootViewController = UINavigationController(rootViewController: rootController)
         } else {
-            rootController = DemoConversationContainerViewController(
-                scenario: .completeConversation
-            )
+            window.rootViewController = DemoRootTabBarController()
         }
-        window.rootViewController = UINavigationController(rootViewController: rootController)
         window.makeKeyAndVisible()
         self.window = window
     }

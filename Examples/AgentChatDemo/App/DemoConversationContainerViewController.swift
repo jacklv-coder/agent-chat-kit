@@ -27,7 +27,7 @@ final class DemoConversationContainerViewController: UIViewController {
     init(
         scenario: DemoScenario,
         playbackController: AgentScenarioPlaybackController = .init(),
-        timelineImplementation: TimelineImplementation = .collectionView,
+        timelineImplementation: TimelineImplementation = .tableView,
         toolPresentationStyle: AgentToolPresentationStyle = .capsule
     ) {
         self.scenario = scenario
@@ -348,9 +348,11 @@ final class DemoConversationContainerViewController: UIViewController {
 
     private func openScenarioBrowser() {
         navigationController?.pushViewController(
-            ScenarioListViewController(
-                timelineImplementation: timelineImplementation,
-                toolPresentationStyle: toolPresentationStyle
+            preservingTabBarVisibility(
+                ScenarioListViewController(
+                    timelineImplementation: timelineImplementation,
+                    toolPresentationStyle: toolPresentationStyle
+                )
             ),
             animated: true
         )
@@ -365,11 +367,13 @@ final class DemoConversationContainerViewController: UIViewController {
             guard let self, let navigationController else { return }
             let state = await playbackController.state()
             navigationController.pushViewController(
-                DemoConversationContainerViewController(
-                    scenario: scenario,
-                    playbackController: .init(isPaused: state.isPaused, rate: state.rate),
-                    timelineImplementation: implementation,
-                    toolPresentationStyle: toolPresentationStyle
+                preservingTabBarVisibility(
+                    DemoConversationContainerViewController(
+                        scenario: scenario,
+                        playbackController: .init(isPaused: state.isPaused, rate: state.rate),
+                        timelineImplementation: implementation,
+                        toolPresentationStyle: toolPresentationStyle
+                    )
                 ),
                 animated: true
             )
@@ -381,11 +385,13 @@ final class DemoConversationContainerViewController: UIViewController {
         Task { @MainActor [weak self] in
             guard let self, let navigationController else { return }
             let state = await playbackController.state()
-            let replacement = DemoConversationContainerViewController(
-                scenario: scenario,
-                playbackController: .init(isPaused: state.isPaused, rate: state.rate),
-                timelineImplementation: timelineImplementation,
-                toolPresentationStyle: style
+            let replacement = preservingTabBarVisibility(
+                DemoConversationContainerViewController(
+                    scenario: scenario,
+                    playbackController: .init(isPaused: state.isPaused, rate: state.rate),
+                    timelineImplementation: timelineImplementation,
+                    toolPresentationStyle: style
+                )
             )
             var controllers = navigationController.viewControllers
             guard !controllers.isEmpty else { return }
@@ -424,11 +430,13 @@ final class DemoConversationContainerViewController: UIViewController {
         Task { @MainActor [weak self] in
             guard let self, let navigationController else { return }
             let state = await playbackController.state()
-            let replacement = DemoConversationContainerViewController(
-                scenario: scenario,
-                playbackController: .init(isPaused: startPaused, rate: state.rate),
-                timelineImplementation: timelineImplementation,
-                toolPresentationStyle: toolPresentationStyle
+            let replacement = preservingTabBarVisibility(
+                DemoConversationContainerViewController(
+                    scenario: scenario,
+                    playbackController: .init(isPaused: startPaused, rate: state.rate),
+                    timelineImplementation: timelineImplementation,
+                    toolPresentationStyle: toolPresentationStyle
+                )
             )
             var controllers = navigationController.viewControllers
             guard !controllers.isEmpty else { return }
@@ -463,6 +471,13 @@ final class DemoConversationContainerViewController: UIViewController {
         case .streaming, .running, .waitingForApproval: return true
         default: return false
         }
+    }
+
+    private func preservingTabBarVisibility<Controller: UIViewController>(
+        _ controller: Controller
+    ) -> Controller {
+        controller.hidesBottomBarWhenPushed = hidesBottomBarWhenPushed
+        return controller
     }
 
     private func copyScenarioJSON() {

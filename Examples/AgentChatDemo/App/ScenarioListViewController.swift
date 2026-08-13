@@ -9,7 +9,7 @@ final class ScenarioListViewController: UITableViewController {
 
     init(
         timelineImplementation: DemoConversationContainerViewController.TimelineImplementation =
-            .collectionView,
+            .tableView,
         toolPresentationStyle: AgentToolPresentationStyle = .capsule
     ) {
         self.timelineImplementation = timelineImplementation
@@ -23,7 +23,8 @@ final class ScenarioListViewController: UITableViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "Test Lab"
-        navigationItem.largeTitleDisplayMode = .never
+        navigationItem.largeTitleDisplayMode = .always
+        tableView.accessibilityIdentifier = "AgentChatDemoScenarioList"
         tableView.register(UITableViewCell.self, forCellReuseIdentifier: "scenario")
     }
 
@@ -49,13 +50,12 @@ final class ScenarioListViewController: UITableViewController {
 
     override func tableView(_ tableView: UITableView, didSelectRowAt indexPath: IndexPath) {
         tableView.deselectRow(at: indexPath, animated: true)
-        navigationController?.pushViewController(
-            DemoConversationContainerViewController(
-                scenario: DemoScenario.allCases[indexPath.row],
-                timelineImplementation: timelineImplementation,
-                toolPresentationStyle: toolPresentationStyle
-            ),
-            animated: true
+        let controller = DemoConversationContainerViewController(
+            scenario: DemoScenario.allCases[indexPath.row],
+            timelineImplementation: timelineImplementation,
+            toolPresentationStyle: toolPresentationStyle
         )
+        controller.hidesBottomBarWhenPushed = true
+        navigationController?.pushViewController(controller, animated: true)
     }
 }
