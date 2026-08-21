@@ -54,6 +54,11 @@ Embed `conversation` as an ordinary child or navigation destination. Keep your c
 account state, runtime choice, persistence, and deep-link routing outside the SDK; pass only the
 selected conversation's store, session, capabilities, and host actions into this page.
 
+Both the recommended table timeline and the optional collection timeline accept a host-provided
+``AgentComposerProviding`` through `composer:` while keeping the original initializer and default
+``AgentComposerView`` behavior. See <doc:ComposerIntegration> for a complete implementation,
+real-time draft requirements, import routing, and accessibility responsibilities.
+
 `ReferenceRuntimeAdapter` is the complete implementation in `Examples/QuickStart`. Copy it first,
 then replace only its offline response logic with your SSE, WebSocket, or local-agent transport.
 The runtime-specific contract is described in <doc:RuntimeAdapter>.

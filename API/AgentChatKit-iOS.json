@@ -2671,6 +2671,50 @@
             ]
           },
           {
+            "kind": "Var",
+            "name": "currentState",
+            "printedName": "currentState",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "AgentComposerState",
+                "printedName": "AgentChatUIKit.AgentComposerState",
+                "usr": "s:14AgentChatUIKit0A13ComposerStateV"
+              }
+            ],
+            "declKind": "Var",
+            "usr": "s:14AgentChatUIKit0A17ComposerProvidingP12currentStateAA0adG0Vvp",
+            "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP12currentStateAA0adG0Vvp",
+            "moduleName": "AgentChatUIKit",
+            "protocolReq": true,
+            "declAttributes": [
+              "Custom"
+            ],
+            "accessors": [
+              {
+                "kind": "Accessor",
+                "name": "Get",
+                "printedName": "Get()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "AgentComposerState",
+                    "printedName": "AgentChatUIKit.AgentComposerState",
+                    "usr": "s:14AgentChatUIKit0A13ComposerStateV"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:14AgentChatUIKit0A17ComposerProvidingP12currentStateAA0adG0Vvg",
+                "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP12currentStateAA0adG0Vvg",
+                "moduleName": "AgentChatUIKit",
+                "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerProviding>",
+                "protocolReq": true,
+                "reqNewWitnessTableEntry": true,
+                "accessorKind": "get"
+              }
+            ]
+          },
+          {
             "kind": "Function",
             "name": "apply",
             "printedName": "apply(_:)",
@@ -2698,11 +2742,304 @@
             ],
             "reqNewWitnessTableEntry": true,
             "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "focus",
+            "printedName": "focus()",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Bool",
+                "printedName": "Swift.Bool",
+                "usr": "s:Sb"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:14AgentChatUIKit0A17ComposerProvidingP5focusSbyF",
+            "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP5focusSbyF",
+            "moduleName": "AgentChatUIKit",
+            "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerProviding>",
+            "protocolReq": true,
+            "declAttributes": [
+              "DiscardableResult",
+              "Custom"
+            ],
+            "reqNewWitnessTableEntry": true,
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "performPrimaryAction",
+            "printedName": "performPrimaryAction()",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Void",
+                "printedName": "()"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:14AgentChatUIKit0A17ComposerProvidingP20performPrimaryActionyyF",
+            "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP20performPrimaryActionyyF",
+            "moduleName": "AgentChatUIKit",
+            "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerProviding>",
+            "protocolReq": true,
+            "declAttributes": [
+              "Custom"
+            ],
+            "reqNewWitnessTableEntry": true,
+            "funcSelfKind": "NonMutating"
           }
         ],
         "declKind": "Protocol",
         "usr": "s:14AgentChatUIKit0A17ComposerProvidingP",
         "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP",
+        "moduleName": "AgentChatUIKit",
+        "genericSig": "<Self : AnyObject>",
+        "declAttributes": [
+          "Custom"
+        ],
+        "conformances": [
+          {
+            "kind": "Conformance",
+            "name": "Escapable",
+            "printedName": "Escapable",
+            "usr": "s:s9EscapableP",
+            "mangledName": "$ss9EscapableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "Copyable",
+            "printedName": "Copyable",
+            "usr": "s:s8CopyableP",
+            "mangledName": "$ss8CopyableP"
+          }
+        ]
+      },
+      {
+        "kind": "TypeDecl",
+        "name": "AgentComposerImportRouting",
+        "printedName": "AgentComposerImportRouting",
+        "children": [
+          {
+            "kind": "Var",
+            "name": "importHandler",
+            "printedName": "importHandler",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Optional",
+                "printedName": "(([Foundation.NSItemProvider], UIKit.UIView) -> Swift.Void)?",
+                "children": [
+                  {
+                    "kind": "TypeFunc",
+                    "name": "Function",
+                    "printedName": "([Foundation.NSItemProvider], UIKit.UIView) -> Swift.Void",
+                    "children": [
+                      {
+                        "kind": "TypeNameAlias",
+                        "name": "Void",
+                        "printedName": "Swift.Void",
+                        "children": [
+                          {
+                            "kind": "TypeNominal",
+                            "name": "Void",
+                            "printedName": "()"
+                          }
+                        ]
+                      },
+                      {
+                        "kind": "TypeNominal",
+                        "name": "Tuple",
+                        "printedName": "([Foundation.NSItemProvider], UIKit.UIView)",
+                        "children": [
+                          {
+                            "kind": "TypeNominal",
+                            "name": "Array",
+                            "printedName": "[Foundation.NSItemProvider]",
+                            "children": [
+                              {
+                                "kind": "TypeNominal",
+                                "name": "NSItemProvider",
+                                "printedName": "Foundation.NSItemProvider",
+                                "usr": "c:objc(cs)NSItemProvider"
+                              }
+                            ],
+                            "usr": "s:Sa"
+                          },
+                          {
+                            "kind": "TypeNominal",
+                            "name": "UIView",
+                            "printedName": "UIKit.UIView",
+                            "usr": "c:objc(cs)UIView"
+                          }
+                        ]
+                      }
+                    ]
+                  }
+                ],
+                "usr": "s:Sq"
+              }
+            ],
+            "declKind": "Var",
+            "usr": "s:14AgentChatUIKit0A21ComposerImportRoutingP13importHandlerySaySo14NSItemProviderCG_So6UIViewCtcSgvp",
+            "mangledName": "$s14AgentChatUIKit0A21ComposerImportRoutingP13importHandlerySaySo14NSItemProviderCG_So6UIViewCtcSgvp",
+            "moduleName": "AgentChatUIKit",
+            "protocolReq": true,
+            "declAttributes": [
+              "Custom"
+            ],
+            "accessors": [
+              {
+                "kind": "Accessor",
+                "name": "Get",
+                "printedName": "Get()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Optional",
+                    "printedName": "(([Foundation.NSItemProvider], UIKit.UIView) -> Swift.Void)?",
+                    "children": [
+                      {
+                        "kind": "TypeFunc",
+                        "name": "Function",
+                        "printedName": "([Foundation.NSItemProvider], UIKit.UIView) -> Swift.Void",
+                        "children": [
+                          {
+                            "kind": "TypeNameAlias",
+                            "name": "Void",
+                            "printedName": "Swift.Void",
+                            "children": [
+                              {
+                                "kind": "TypeNominal",
+                                "name": "Void",
+                                "printedName": "()"
+                              }
+                            ]
+                          },
+                          {
+                            "kind": "TypeNominal",
+                            "name": "Tuple",
+                            "printedName": "([Foundation.NSItemProvider], UIKit.UIView)",
+                            "children": [
+                              {
+                                "kind": "TypeNominal",
+                                "name": "Array",
+                                "printedName": "[Foundation.NSItemProvider]",
+                                "children": [
+                                  {
+                                    "kind": "TypeNominal",
+                                    "name": "NSItemProvider",
+                                    "printedName": "Foundation.NSItemProvider",
+                                    "usr": "c:objc(cs)NSItemProvider"
+                                  }
+                                ],
+                                "usr": "s:Sa"
+                              },
+                              {
+                                "kind": "TypeNominal",
+                                "name": "UIView",
+                                "printedName": "UIKit.UIView",
+                                "usr": "c:objc(cs)UIView"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "usr": "s:Sq"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:14AgentChatUIKit0A21ComposerImportRoutingP13importHandlerySaySo14NSItemProviderCG_So6UIViewCtcSgvg",
+                "mangledName": "$s14AgentChatUIKit0A21ComposerImportRoutingP13importHandlerySaySo14NSItemProviderCG_So6UIViewCtcSgvg",
+                "moduleName": "AgentChatUIKit",
+                "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerImportRouting>",
+                "protocolReq": true,
+                "reqNewWitnessTableEntry": true,
+                "accessorKind": "get"
+              },
+              {
+                "kind": "Accessor",
+                "name": "Set",
+                "printedName": "Set()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Void",
+                    "printedName": "()"
+                  },
+                  {
+                    "kind": "TypeNominal",
+                    "name": "Optional",
+                    "printedName": "(([Foundation.NSItemProvider], UIKit.UIView) -> Swift.Void)?",
+                    "children": [
+                      {
+                        "kind": "TypeFunc",
+                        "name": "Function",
+                        "printedName": "([Foundation.NSItemProvider], UIKit.UIView) -> Swift.Void",
+                        "children": [
+                          {
+                            "kind": "TypeNameAlias",
+                            "name": "Void",
+                            "printedName": "Swift.Void",
+                            "children": [
+                              {
+                                "kind": "TypeNominal",
+                                "name": "Void",
+                                "printedName": "()"
+                              }
+                            ]
+                          },
+                          {
+                            "kind": "TypeNominal",
+                            "name": "Tuple",
+                            "printedName": "([Foundation.NSItemProvider], UIKit.UIView)",
+                            "children": [
+                              {
+                                "kind": "TypeNominal",
+                                "name": "Array",
+                                "printedName": "[Foundation.NSItemProvider]",
+                                "children": [
+                                  {
+                                    "kind": "TypeNominal",
+                                    "name": "NSItemProvider",
+                                    "printedName": "Foundation.NSItemProvider",
+                                    "usr": "c:objc(cs)NSItemProvider"
+                                  }
+                                ],
+                                "usr": "s:Sa"
+                              },
+                              {
+                                "kind": "TypeNominal",
+                                "name": "UIView",
+                                "printedName": "UIKit.UIView",
+                                "usr": "c:objc(cs)UIView"
+                              }
+                            ]
+                          }
+                        ]
+                      }
+                    ],
+                    "usr": "s:Sq"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:14AgentChatUIKit0A21ComposerImportRoutingP13importHandlerySaySo14NSItemProviderCG_So6UIViewCtcSgvs",
+                "mangledName": "$s14AgentChatUIKit0A21ComposerImportRoutingP13importHandlerySaySo14NSItemProviderCG_So6UIViewCtcSgvs",
+                "moduleName": "AgentChatUIKit",
+                "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerImportRouting>",
+                "protocolReq": true,
+                "reqNewWitnessTableEntry": true,
+                "accessorKind": "set"
+              }
+            ]
+          }
+        ],
+        "declKind": "Protocol",
+        "usr": "s:14AgentChatUIKit0A21ComposerImportRoutingP",
+        "mangledName": "$s14AgentChatUIKit0A21ComposerImportRoutingP",
         "moduleName": "AgentChatUIKit",
         "genericSig": "<Self : AnyObject>",
         "declAttributes": [
@@ -3128,6 +3465,50 @@
             ]
           },
           {
+            "kind": "Var",
+            "name": "currentState",
+            "printedName": "currentState",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "AgentComposerState",
+                "printedName": "AgentChatUIKit.AgentComposerState",
+                "usr": "s:14AgentChatUIKit0A13ComposerStateV"
+              }
+            ],
+            "declKind": "Var",
+            "usr": "s:14AgentChatUIKit0A12ComposerViewC12currentStateAA0adG0Vvp",
+            "mangledName": "$s14AgentChatUIKit0A12ComposerViewC12currentStateAA0adG0Vvp",
+            "moduleName": "AgentChatUIKit",
+            "declAttributes": [
+              "Final",
+              "Custom"
+            ],
+            "accessors": [
+              {
+                "kind": "Accessor",
+                "name": "Get",
+                "printedName": "Get()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "AgentComposerState",
+                    "printedName": "AgentChatUIKit.AgentComposerState",
+                    "usr": "s:14AgentChatUIKit0A13ComposerStateV"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:14AgentChatUIKit0A12ComposerViewC12currentStateAA0adG0Vvg",
+                "mangledName": "$s14AgentChatUIKit0A12ComposerViewC12currentStateAA0adG0Vvg",
+                "moduleName": "AgentChatUIKit",
+                "declAttributes": [
+                  "Final"
+                ],
+                "accessorKind": "get"
+              }
+            ]
+          },
+          {
             "kind": "Constructor",
             "name": "init",
             "printedName": "init(maximumHeight:)",
@@ -3226,6 +3607,27 @@
             "declAttributes": [
               "Final",
               "DiscardableResult",
+              "Custom"
+            ],
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "performPrimaryAction",
+            "printedName": "performPrimaryAction()",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Void",
+                "printedName": "()"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:14AgentChatUIKit0A12ComposerViewC20performPrimaryActionyyF",
+            "mangledName": "$s14AgentChatUIKit0A12ComposerViewC20performPrimaryActionyyF",
+            "moduleName": "AgentChatUIKit",
+            "declAttributes": [
+              "Final",
               "Custom"
             ],
             "funcSelfKind": "NonMutating"
@@ -3536,6 +3938,13 @@
           "ObjectiveC.NSObject"
         ],
         "conformances": [
+          {
+            "kind": "Conformance",
+            "name": "AgentComposerImportRouting",
+            "printedName": "AgentComposerImportRouting",
+            "usr": "s:14AgentChatUIKit0A21ComposerImportRoutingP",
+            "mangledName": "$s14AgentChatUIKit0A21ComposerImportRoutingP"
+          },
           {
             "kind": "Conformance",
             "name": "AgentComposerProviding",
@@ -6470,6 +6879,68 @@
             "init_kind": "Designated"
           },
           {
+            "kind": "Constructor",
+            "name": "init",
+            "printedName": "init(store:configuration:theme:rendererRegistry:composer:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "AgentConversationViewController",
+                "printedName": "AgentChatUIKit.AgentConversationViewController",
+                "usr": "c:@M@AgentChatUIKit@objc(cs)AgentConversationViewController"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "AgentConversationStore",
+                "printedName": "AgentChatCore.AgentConversationStore",
+                "usr": "s:13AgentChatCore0A17ConversationStoreC"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "AgentConversationConfiguration",
+                "printedName": "AgentChatUIKit.AgentConversationConfiguration",
+                "hasDefaultArg": true,
+                "usr": "s:14AgentChatUIKit0A25ConversationConfigurationV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "AgentChatTheme",
+                "printedName": "AgentChatUIKit.AgentChatTheme",
+                "hasDefaultArg": true,
+                "usr": "s:14AgentChatUIKit0aB5ThemeV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "AgentBlockRendererRegistry",
+                "printedName": "AgentChatUIKit.AgentBlockRendererRegistry",
+                "hasDefaultArg": true,
+                "usr": "s:14AgentChatUIKit0A21BlockRendererRegistryC"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Optional",
+                "printedName": "(any AgentChatUIKit.AgentComposerProviding)?",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "AgentComposerProviding",
+                    "printedName": "any AgentChatUIKit.AgentComposerProviding",
+                    "usr": "s:14AgentChatUIKit0A17ComposerProvidingP"
+                  }
+                ],
+                "usr": "s:Sq"
+              }
+            ],
+            "declKind": "Constructor",
+            "usr": "s:14AgentChatUIKit0A26ConversationViewControllerC5store13configuration5theme16rendererRegistry8composerAC0aB4Core0aD5StoreC_AA0aD13ConfigurationVAA0aB5ThemeVAA0a13BlockRendererK0CAA0A17ComposerProviding_pSgtcfc",
+            "mangledName": "$s14AgentChatUIKit0A26ConversationViewControllerC5store13configuration5theme16rendererRegistry8composerAC0aB4Core0aD5StoreC_AA0aD13ConfigurationVAA0aB5ThemeVAA0a13BlockRendererK0CAA0A17ComposerProviding_pSgtcfc",
+            "moduleName": "AgentChatUIKit",
+            "declAttributes": [
+              "Custom"
+            ],
+            "init_kind": "Convenience"
+          },
+          {
             "kind": "Function",
             "name": "viewDidLoad",
             "printedName": "viewDidLoad()",
@@ -7581,6 +8052,68 @@
               "Custom"
             ],
             "init_kind": "Designated"
+          },
+          {
+            "kind": "Constructor",
+            "name": "init",
+            "printedName": "init(store:configuration:theme:rendererRegistry:composer:)",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "AgentTableConversationViewController",
+                "printedName": "AgentChatUIKit.AgentTableConversationViewController",
+                "usr": "c:@M@AgentChatUIKit@objc(cs)AgentTableConversationViewController"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "AgentConversationStore",
+                "printedName": "AgentChatCore.AgentConversationStore",
+                "usr": "s:13AgentChatCore0A17ConversationStoreC"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "AgentConversationConfiguration",
+                "printedName": "AgentChatUIKit.AgentConversationConfiguration",
+                "hasDefaultArg": true,
+                "usr": "s:14AgentChatUIKit0A25ConversationConfigurationV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "AgentChatTheme",
+                "printedName": "AgentChatUIKit.AgentChatTheme",
+                "hasDefaultArg": true,
+                "usr": "s:14AgentChatUIKit0aB5ThemeV"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "AgentBlockRendererRegistry",
+                "printedName": "AgentChatUIKit.AgentBlockRendererRegistry",
+                "hasDefaultArg": true,
+                "usr": "s:14AgentChatUIKit0A21BlockRendererRegistryC"
+              },
+              {
+                "kind": "TypeNominal",
+                "name": "Optional",
+                "printedName": "(any AgentChatUIKit.AgentComposerProviding)?",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "AgentComposerProviding",
+                    "printedName": "any AgentChatUIKit.AgentComposerProviding",
+                    "usr": "s:14AgentChatUIKit0A17ComposerProvidingP"
+                  }
+                ],
+                "usr": "s:Sq"
+              }
+            ],
+            "declKind": "Constructor",
+            "usr": "s:14AgentChatUIKit0A31TableConversationViewControllerC5store13configuration5theme16rendererRegistry8composerAC0aB4Core0aE5StoreC_AA0aE13ConfigurationVAA0aB5ThemeVAA0a13BlockRendererL0CAA0A17ComposerProviding_pSgtcfc",
+            "mangledName": "$s14AgentChatUIKit0A31TableConversationViewControllerC5store13configuration5theme16rendererRegistry8composerAC0aB4Core0aE5StoreC_AA0aE13ConfigurationVAA0aB5ThemeVAA0a13BlockRendererL0CAA0A17ComposerProviding_pSgtcfc",
+            "moduleName": "AgentChatUIKit",
+            "declAttributes": [
+              "Custom"
+            ],
+            "init_kind": "Convenience"
           },
           {
             "kind": "Function",

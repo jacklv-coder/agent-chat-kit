@@ -6,6 +6,9 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Added
 
+- Host-injectable ``AgentComposerProviding`` support for both UITableView and UICollectionView
+  conversation controllers, including live draft state, focus/primary keyboard actions, optional
+  item-provider import routing, and lifecycle-safe single-stream consumption.
 - Swift Package baseline with Core, Markdown, UIKit, Testing, and umbrella products.
 - Strongly typed conversation models and runtime-neutral adapter SPI.
 - Deterministic actor-based event reducer, main-actor store, and session coordinator.

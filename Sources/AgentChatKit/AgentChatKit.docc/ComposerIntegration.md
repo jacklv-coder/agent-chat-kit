@@ -35,6 +35,103 @@ draft and reports the restored attachments again.
 
 ## Replace the composer
 
-For a fully custom input surface, implement ``AgentComposerProviding`` and preserve the semantic
-actions in ``AgentComposerAction``. Keep touch targets, Dynamic Type, VoiceOver, CJK marked-text
-editing, RTL layout, hardware keyboard commands, and keyboard-safe-area behavior in the replacement.
+For a fully custom input surface, implement ``AgentComposerProviding``. The conversation controller
+installs `composer.view`, applies ``AgentComposerState`` whenever draft or runtime state changes, and
+consumes the composer's single ``AgentComposerProviding/actionStream``. The following implementation
+shows the complete semantic bridge; a production host can replace its visual setup with an existing
+design system:
+
+```swift
+import AgentChatKit
+import UIKit
+
+@MainActor
+final class ProductComposer: UIView, AgentComposerProviding, AgentComposerImportRouting {
+    private let editor = UITextView()
+    private var state = AgentComposerState()
+    private let continuation: AsyncStream<AgentComposerAction>.Continuation
+
+    let actionStream: AsyncStream<AgentComposerAction>
+    var view: UIView { self }
+    var importHandler: (([NSItemProvider], UIView) -> Void)?
+
+    var currentState: AgentComposerState {
+        var current = state
+        current.text = editor.text // Always return the live, not last-applied, draft.
+        return current
+    }
+
+    override init(frame: CGRect) {
+        let pair = AsyncStream<AgentComposerAction>.makeStream(
+            bufferingPolicy: .bufferingNewest(32)
+        )
+        actionStream = pair.stream
+        continuation = pair.continuation
+        super.init(frame: frame)
+
+        // Add the editor, attachment controls, accessories, and Send/Stop control here.
+        // Each control emits the matching AgentComposerAction through continuation.
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) { nil }
+
+    deinit { continuation.finish() }
+
+    func apply(_ state: AgentComposerState) {
+        self.state = state
+        if editor.text != state.text { editor.text = state.text }
+        // Render state.attachments, attachmentStatuses, accessories, statusMessage,
+        // contextDescription, isRunning, canSend, and canPickAttachments here.
+    }
+
+    @discardableResult
+    func focus() -> Bool { editor.becomeFirstResponder() }
+
+    func performPrimaryAction() {
+        let current = currentState
+        if current.isRunning {
+            continuation.yield(.stop)
+            return
+        }
+        let text = current.text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard current.canSend, !text.isEmpty || !current.attachments.isEmpty else { return }
+        continuation.yield(.send(text: text, attachments: current.attachments))
+    }
+
+    func pickAttachments() { continuation.yield(.pickAttachments) }
+    func removeAttachment(_ id: AgentAttachmentID) {
+        continuation.yield(.removeAttachment(id))
+    }
+    func retryAttachment(_ id: AgentAttachmentID) {
+        continuation.yield(.retryAttachment(id))
+    }
+    func selectAccessory(_ id: String) {
+        continuation.yield(.selectAccessory(id))
+    }
+}
+
+let composer = ProductComposer()
+let page = AgentTableConversationViewController(
+    store: store,
+    configuration: configuration,
+    composer: composer
+)
+```
+
+Use the same `composer:` initializer on ``AgentConversationViewController`` for the collection-view
+timeline. Passing `nil`, or using the original initializer without `composer:`, retains the default
+``AgentComposerView`` and its existing layout and behavior.
+
+`currentState` must always merge the text currently visible in the editor with the last applied
+state. This preserves in-progress input when connection, attachment, accessory, or run state changes.
+Return one stable action stream and finish its continuation when the composer is released.
+
+Adopt ``AgentComposerImportRouting`` only when the replacement accepts pasted or dropped
+`NSItemProvider` values. The controller installs the host import callback without assuming the
+composer's concrete type. Implementations that do not support import can omit this protocol.
+
+The replacement owns Dynamic Type, VoiceOver labels and traits, CJK marked-text editing, RTL layout,
+keyboard-safe sizing, and minimum 44-point interaction targets. AgentChatKit supplies semantic state
+and routes semantic actions; it does not implement the host's model selection, upload, runtime,
+permission, persistence, or other business logic.
