@@ -289,8 +289,10 @@ public actor AgentConversationReducer {
             snapshot.hasEarlierHistory = page.hasEarlierHistory
             if !prepended.isEmpty {
                 output.patches.append(.prependTurns(prepended.map(\.id)))
-                validate(blocks: prepended.flatMap(\.blocks), output: &output)
             }
+            // Keep state and structural changes in the same critical scheduler flush.
+            output.patches.append(.historyStateChanged)
+            validate(blocks: prepended.flatMap(\.blocks), output: &output)
             appendStableIDNotices(
                 duplicateTurnIDs: hadDuplicateTurnIDs,
                 duplicateBlockIDs: hadDuplicateBlockIDs,

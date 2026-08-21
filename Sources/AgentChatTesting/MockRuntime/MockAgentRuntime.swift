@@ -7,6 +7,8 @@ public actor MockAgentRuntime: AgentRuntimeAdapter {
     private let scenario: AgentScenario
     private let capabilities: AgentRuntimeCapabilities
     private var latestConnection: MockAgentRuntimeConnection?
+    /// Playback controls shared with debug surfaces and UI tests.
+    public nonisolated let playbackController: AgentScenarioPlaybackController
 
     /// Creates a mock runtime.
     public init(
@@ -14,10 +16,12 @@ public actor MockAgentRuntime: AgentRuntimeAdapter {
         capabilities: AgentRuntimeCapabilities = [
             .streamingText, .tools, .commands, .fileOperations, .diffs, .approvals,
             .attachments, .history, .retry, .interrupt, .customBlocks,
-        ]
+        ],
+        playbackController: AgentScenarioPlaybackController = .init()
     ) {
         self.scenario = scenario
         self.capabilities = capabilities
+        self.playbackController = playbackController
     }
 
     /// Creates a fresh scripted connection.
@@ -26,7 +30,9 @@ public actor MockAgentRuntime: AgentRuntimeAdapter {
     {
         let connection = MockAgentRuntimeConnection(
             scenario: scenario,
-            capabilities: capabilities
+            capabilities: capabilities,
+            conversationID: configuration.conversationID,
+            playbackController: playbackController
         )
         latestConnection = connection
         return connection
@@ -48,12 +54,19 @@ public final class MockAgentRuntimeConnection: AgentRuntimeConnection, Sendable 
     private let controller: MockConnectionController
 
     /// Creates and starts a scripted connection.
-    public init(scenario: AgentScenario, capabilities: AgentRuntimeCapabilities) {
+    public init(
+        scenario: AgentScenario,
+        capabilities: AgentRuntimeCapabilities,
+        conversationID: AgentConversationID? = nil,
+        playbackController: AgentScenarioPlaybackController = .init()
+    ) {
         self.capabilities = capabilities
         let pair = AsyncThrowingStream<AgentRuntimeEvent, any Error>.makeStream()
         self.stream = pair.stream
         self.controller = MockConnectionController(
             scenario: scenario,
+            conversationID: conversationID,
+            playbackController: playbackController,
             continuation: pair.continuation
         )
         Task { await controller.start() }
@@ -98,6 +111,7 @@ public enum MockRuntimeError: Error, Hashable, Sendable {
 
 private actor MockConnectionController {
     private let scenario: AgentScenario
+    private let playbackController: AgentScenarioPlaybackController
     private let continuation: AsyncThrowingStream<AgentRuntimeEvent, any Error>.Continuation
     private var producer: Task<Void, Never>?
     private var received: [AgentRuntimeCommand] = []
@@ -111,12 +125,15 @@ private actor MockConnectionController {
 
     init(
         scenario: AgentScenario,
+        conversationID: AgentConversationID?,
+        playbackController: AgentScenarioPlaybackController,
         continuation: AsyncThrowingStream<AgentRuntimeEvent, any Error>.Continuation
     ) {
         self.scenario = scenario
+        self.playbackController = playbackController
         self.continuation = continuation
         let firstEvent = scenario.events.first?.event
-        let conversationID = firstEvent?.conversationID ?? "mock"
+        let conversationID = firstEvent?.conversationID ?? conversationID ?? "mock"
         let initial = AgentConversationSnapshot.empty(conversationID: conversationID)
         self.reducer = AgentConversationReducer(snapshot: initial)
         self.latestSnapshot = initial
@@ -130,9 +147,11 @@ private actor MockConnectionController {
         producer = Task { [weak self, scenario] in
             do {
                 for step in scenario.events {
-                    try await Task.sleep(nanoseconds: step.delayNanoseconds)
-                    try Task.checkCancellation()
-                    await self?.emit(step.event)
+                    guard let self else { return }
+                    try await self.playbackController.waitBeforeEmission(
+                        delayNanoseconds: step.delayNanoseconds
+                    )
+                    await self.emit(step.event)
                 }
             } catch {
                 return
@@ -180,7 +199,11 @@ private actor MockConnectionController {
                     )
                 ),
                 state: .running(progress: nil),
-                createdAt: nextCommandTimestamp
+                createdAt: nextCommandTimestamp,
+                metadata: [
+                    AgentBlockMetadataKey.activityKind: .string("reasoning"),
+                    AgentBlockMetadataKey.displaySubtitle: .string("正在梳理检查步骤"),
+                ]
             )
             await emitGenerated(
                 conversationID: request.conversationID,
@@ -234,6 +257,39 @@ private actor MockConnectionController {
             await emitGenerated(
                 conversationID: request.conversationID,
                 payload: .turnUpdated(lastTurn)
+            )
+
+        case .retry(let request):
+            guard let blockID = request.blockID,
+                let turn = latestSnapshot.turns.first(where: { turn in
+                    turn.blocks.contains(where: { $0.id == blockID })
+                }),
+                var block = turn.blocks.first(where: { $0.id == blockID }),
+                case .failed(let failure) = block.state,
+                failure.isRetryable
+            else { return }
+            block.state = .succeeded
+            block.revision += 1
+            block.updatedAt = nextCommandTimestamp
+            if case .tool(let tool) = block.content {
+                block.metadata[AgentBlockMetadataKey.displayTitle] = .string(tool.title)
+            }
+            block.metadata[AgentBlockMetadataKey.displaySubtitle] = .string("Retry succeeded")
+            await emitGenerated(
+                conversationID: request.conversationID,
+                payload: .blockReplaced(turnID: turn.id, block: block)
+            )
+
+        case .loadEarlier(let request):
+            let page =
+                scenario.historyPage(for: request.cursor)
+                ?? AgentHistoryPage(turns: [], hasEarlierHistory: false)
+            try await playbackController.waitBeforeEmission(
+                delayNanoseconds: 300_000_000
+            )
+            await emitGenerated(
+                conversationID: request.conversationID,
+                payload: .historyPage(page)
             )
 
         default:
@@ -291,7 +347,7 @@ private actor MockConnectionController {
                 $0.id == thinkingID
             })?.createdAt ?? nextCommandTimestamp
 
-        guard await pause(milliseconds: 450) else { return }
+        guard await pause(milliseconds: 1_000) else { return }
         await emitGenerated(
             conversationID: request.conversationID,
             payload: .blockReplaced(
@@ -307,7 +363,14 @@ private actor MockConnectionController {
                     ),
                     state: .succeeded,
                     revision: 1,
-                    createdAt: thinkingCreatedAt
+                    createdAt: thinkingCreatedAt,
+                    metadata: [
+                        AgentBlockMetadataKey.activityKind: .string("reasoning"),
+                        AgentBlockMetadataKey.displaySubtitle: .string("思考了 1.0 秒"),
+                        AgentBlockMetadataKey.expandedDetail: .string(
+                            "已生成用户安全的推理摘要；不会展示私有思维链。"
+                        ),
+                    ]
                 )
             )
         )
@@ -359,7 +422,11 @@ private actor MockConnectionController {
                         .init(command: "swift test --filter AgentTimelineTests")
                     ),
                     state: .running(progress: nil),
-                    createdAt: commandCreatedAt
+                    createdAt: commandCreatedAt,
+                    metadata: [
+                        AgentBlockMetadataKey.displayTitle: .string("运行时间线测试"),
+                        AgentBlockMetadataKey.displaySubtitle: .string("swift test · 正在运行"),
+                    ]
                 )
             )
         )
@@ -399,7 +466,11 @@ private actor MockConnectionController {
                     ),
                     state: .succeeded,
                     revision: 2,
-                    createdAt: commandCreatedAt
+                    createdAt: commandCreatedAt,
+                    metadata: [
+                        AgentBlockMetadataKey.displayTitle: .string("已运行时间线测试"),
+                        AgentBlockMetadataKey.displaySubtitle: .string("32 项通过 · 0.7s"),
+                    ]
                 )
             )
         )

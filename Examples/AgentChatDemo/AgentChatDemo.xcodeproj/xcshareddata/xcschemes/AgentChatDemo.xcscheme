@@ -39,6 +39,17 @@
          </BuildableReference>
       </MacroExpansion>
       <Testables>
+         <TestableReference
+            skipped = "NO"
+            parallelizable = "NO">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "D9DF6BF8655D90B7DC434A2D"
+               BuildableName = "AgentChatDemoUITests.xctest"
+               BlueprintName = "AgentChatDemoUITests"
+               ReferencedContainer = "container:AgentChatDemo.xcodeproj">
+            </BuildableReference>
+         </TestableReference>
       </Testables>
       <CommandLineArguments>
       </CommandLineArguments>

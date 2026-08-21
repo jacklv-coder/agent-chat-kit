@@ -28,14 +28,27 @@ not yet a `1.0.0` release.
 - `AgentChatTesting`: scripted offline mock runtime and fixtures.
 - `AgentChatKit`: umbrella module for application integration.
 
-## Minimal integration
+## Start with a runnable integration
+
+[`Examples/QuickStart`](Examples/QuickStart) is a complete, CI-built host app. It includes the full
+[`ReferenceRuntimeAdapter`](Examples/QuickStart/App/ReferenceRuntimeAdapter.swift), so no placeholder
+types or hidden backend are required:
+
+```sh
+cd Examples/QuickStart
+xcodegen generate
+xcodebuild -project AgentChatQuickStart.xcodeproj -scheme AgentChatQuickStart \
+  -destination 'generic/platform=iOS Simulator' build
+```
+
+The scene wiring is intentionally small:
 
 ```swift
 import AgentChatKit
 
 let store = AgentConversationStore(snapshot: .empty(conversationID: "demo"))
 let session = AgentChatSession(
-    adapter: MyRuntimeAdapter(),
+    adapter: ReferenceRuntimeAdapter(), // Complete implementation in Examples/QuickStart
     configuration: .init(conversationID: "demo"),
     reducerConfiguration: .init(),
     store: store
@@ -58,10 +71,13 @@ reduces structured events, renders state, and routes user actions.
 swift package resolve
 xcodebuild -scheme AgentChatKit-Package \
   -destination 'platform=iOS Simulator,name=iPhone 16' test
+Scripts/check-api-baseline.sh
 ```
 
-The UIKit timeline uses a native single-column compositional layout, `AgentUpdateScheduler`, and
-stable-ID `AgentScrollCoordinator` anchoring. The demo project is generated from
+The recommended UIKit page uses `AgentTableConversationViewController`: a traditional
+`UITableViewDataSource`, explicit batch updates, self-sizing rows, and stable-ID history anchoring.
+`AgentConversationViewController` remains available when a host needs a custom collection layout.
+The demo project is generated from
 `Examples/AgentChatDemo/project.yml` with `xcodegen generate`.
 
 ## Offline demo
@@ -73,16 +89,38 @@ xcodebuild -project AgentChatDemo.xcodeproj -scheme AgentChatDemo \
   -destination 'platform=iOS Simulator,name=iPhone 16' build
 ```
 
-The Demo contains all 18 normative scenario entries, a complete cell showcase that combines every
-built-in block, and a current-conversation replay for checking realistic Chinese Markdown, tables,
-trees, long-message layout, and sanitized tool-activity cells for commands, image inspection, file
-edits, skills, and host integrations. Tool activity uses compact icon-and-summary rows with
-whole-row expandable details and animated height changes. Expanded image activity resolves a
-thumbnail through the injected `AgentImageProviding`; tapping it opens the Demo's full-screen
-pan-and-zoom preview. Markdown tables use a native, accessible grid with horizontal scrolling when
-needed. Submitting composer text produces an offline sequence of thinking, file search, command,
-file-read, and streaming Markdown events. The Demo never performs model, network, shell, or
-filesystem work. Its scripted runtime also supports approval and interrupt interactions.
+The Demo uses a production-shaped tab architecture. **Chats** opens a recent-conversation list; each
+row pushes a native `UITableView` message page with cursor pagination, user and assistant turns,
+tool activity, Markdown, a working composer, and deterministic streamed responses. **Test Lab** is
+the second tab and contains all normative scenarios, including a complete cell showcase and a
+current-conversation replay for checking realistic Chinese Markdown, tables, trees,
+long-message layout, and sanitized
+tool activity for commands, image inspection, file edits, skills, and host integrations. Tool
+activity uses compact icon-and-summary rows with whole-row expandable details and immediate
+self-sizing height updates. Expanded image activity resolves a thumbnail through the injected
+`AgentImageProviding`; tapping it opens the Demo's full-screen pan-and-zoom preview. Markdown tables
+use a native, accessible grid with horizontal scrolling when needed; fenced code scrolls
+horizontally, supports full-source copy and a labeled, bounded in-list preview, and raw unified diffs
+parse off the main actor.
+Rows expose copy/open/retry/approval context menus, pointer feedback, and host-routed full-output
+actions. The composer accepts host-routed file, image, URL, and text drops. The timeline follows
+streaming output only while the reader owns the latest position,
+preserves a stable visible anchor when older history is prepended, and exposes Jump to Latest after
+manual reading. Submitting composer text produces an offline sequence of thinking, file search,
+command, file-read, and streaming Markdown events. The Demo never performs model, network, shell,
+or filesystem work. Complete Conversation includes a one-tap sample response. Test Lab reports live
+playback state, resumes or single-steps paused fixtures, replays from the beginning, resets into a
+paused state, changes replay speed, and copies a versioned scenario JSON fixture. The same fixture
+format is consumed by `AgentChatTesting`.
+
+## Integration documentation
+
+- [Getting started](Sources/AgentChatKit/AgentChatKit.docc/GettingStarted.md)
+- [Complete conversation experience](Sources/AgentChatKit/AgentChatKit.docc/ConversationExperience.md)
+- [Runtime adapter contract](Sources/AgentChatKit/AgentChatKit.docc/RuntimeAdapter.md)
+- [Composer integration](Sources/AgentChatKit/AgentChatKit.docc/ComposerIntegration.md)
+- [Deterministic testing scenarios](Sources/AgentChatKit/AgentChatKit.docc/TestingScenarios.md)
+- [OpenMinis and Hermex reference review](doc/REFERENCE_REVIEW.md)
 
 ## License
 

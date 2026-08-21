@@ -192,6 +192,10 @@ final class AgentConversationReducerTests: XCTestCase {
         )
         let history = await reducer.consume(makeEvent(sequence: 2, payload: .historyPage(page)))
         XCTAssertEqual(history.snapshot.turns.map(\.id), ["old", "new"])
+        XCTAssertEqual(
+            Array(history.patches.prefix(2)),
+            [.prependTurns(["old"]), .historyStateChanged]
+        )
         let deleted = await reducer.consume(
             makeEvent(
                 sequence: 3,
@@ -200,6 +204,19 @@ final class AgentConversationReducerTests: XCTestCase {
         )
         XCTAssertEqual(deleted.snapshot.turns.count, 2)
         XCTAssertTrue(deleted.patches.isEmpty)
+    }
+
+    func testEmptyHistoryPageStillPublishesHistoryStateChange() async {
+        let reducer = makeReducer()
+        let page = AgentHistoryPage(turns: [], hasEarlierHistory: false)
+
+        let result = await reducer.consume(
+            makeEvent(sequence: 1, payload: .historyPage(page))
+        )
+
+        XCTAssertEqual(result.patches, [.historyStateChanged])
+        XCTAssertFalse(result.snapshot.hasEarlierHistory)
+        XCTAssertNil(result.snapshot.earlierHistoryCursor)
     }
 
     func testDuplicateBlockIdentifierAcrossTurnsIsIgnored() async {

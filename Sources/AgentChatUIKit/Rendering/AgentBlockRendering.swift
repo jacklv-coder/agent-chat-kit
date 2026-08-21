@@ -11,17 +11,25 @@ public struct AgentRenderEnvironment: Sendable {
     public var resolvingApprovalIDs: Set<AgentApprovalID>
     /// Blocks expanded in local presentation state.
     public var expandedBlockIDs: Set<AgentBlockID>
+    /// Whether the connected runtime accepts retry commands.
+    public var canRetry: Bool
+    /// The configured compact-tool visual treatment.
+    public var toolPresentationStyle: AgentToolPresentationStyle
     /// Creates a render environment.
     public init(
         contentSizeCategory: String,
         reduceMotionEnabled: Bool,
         resolvingApprovalIDs: Set<AgentApprovalID> = [],
-        expandedBlockIDs: Set<AgentBlockID> = []
+        expandedBlockIDs: Set<AgentBlockID> = [],
+        canRetry: Bool = false,
+        toolPresentationStyle: AgentToolPresentationStyle = .inline
     ) {
         self.contentSizeCategory = contentSizeCategory
         self.reduceMotionEnabled = reduceMotionEnabled
         self.resolvingApprovalIDs = resolvingApprovalIDs
         self.expandedBlockIDs = expandedBlockIDs
+        self.canRetry = canRetry
+        self.toolPresentationStyle = toolPresentationStyle
     }
 }
 
@@ -117,11 +125,40 @@ public protocol AgentBlockRenderer: AnyObject {
     ) -> UICollectionViewCell
 }
 
+/// Optional TableView support for a block renderer.
+///
+/// Existing collection renderers remain source compatible. Adopt this protocol when the same custom
+/// block should also appear in ``AgentTableConversationViewController``.
+@MainActor
+public protocol AgentTableBlockRenderer: AgentBlockRenderer {
+    /// Registers reusable table cells.
+    func register(in tableView: UITableView)
+    /// Dequeues and configures one block table cell.
+    func dequeueConfiguredCell(
+        from tableView: UITableView,
+        at indexPath: IndexPath,
+        context: AgentBlockRenderContext
+    ) -> UITableViewCell
+}
+
+/// Internal sizing hook used by the table timeline to calculate and cache a row before display.
+/// Custom renderers that do not adopt it continue to use UITableView self-sizing.
+@MainActor
+protocol AgentTableBlockLayoutProviding: AnyObject {
+    func tableRowHeight(for context: AgentBlockRenderContext) -> CGFloat
+}
+
+@MainActor
+protocol AgentBlockRendererCacheManaging: AnyObject {
+    func removeCachedData()
+}
+
 /// A scene-local registry that falls back safely for unknown and mismatched blocks.
 @MainActor
 public final class AgentBlockRendererRegistry {
     private var renderers: [AgentBlockKind: any AgentBlockRenderer] = [:]
     private let fallbackRenderer: any AgentBlockRenderer
+    private let defaultTableFallbackRenderer = AgentDefaultBlockRenderer(supportedKinds: [])
 
     /// A fresh registry containing the in-package renderers.
     public static var `default`: AgentBlockRendererRegistry {
@@ -165,5 +202,42 @@ public final class AgentBlockRendererRegistry {
             let identifier = ObjectIdentifier(renderer)
             if registered.insert(identifier).inserted { renderer.register(in: collectionView) }
         }
+    }
+
+    func tableRenderer(for block: AgentBlock) -> any AgentTableBlockRenderer {
+        guard block.hasCompatibleKindAndContent,
+            let renderer = renderers[block.kind] as? any AgentTableBlockRenderer
+        else {
+            return fallbackRenderer as? any AgentTableBlockRenderer
+                ?? defaultTableFallbackRenderer
+        }
+        return renderer
+    }
+
+    func registerAll(in tableView: UITableView) {
+        defaultTableFallbackRenderer.register(in: tableView)
+        var registered = Set<ObjectIdentifier>()
+        if let fallback = fallbackRenderer as? any AgentTableBlockRenderer {
+            fallback.register(in: tableView)
+            registered.insert(ObjectIdentifier(fallback))
+        }
+        for renderer in renderers.values {
+            guard let tableRenderer = renderer as? any AgentTableBlockRenderer else { continue }
+            let identifier = ObjectIdentifier(renderer)
+            if registered.insert(identifier).inserted { tableRenderer.register(in: tableView) }
+        }
+    }
+
+    func removeCachedData() {
+        var cleared = Set<ObjectIdentifier>()
+        let candidates: [any AgentBlockRenderer] = [fallbackRenderer] + Array(renderers.values)
+        for renderer in candidates {
+            let identifier = ObjectIdentifier(renderer)
+            guard cleared.insert(identifier).inserted,
+                let cacheManaging = renderer as? any AgentBlockRendererCacheManaging
+            else { continue }
+            cacheManaging.removeCachedData()
+        }
+        defaultTableFallbackRenderer.removeCachedData()
     }
 }

@@ -1,0 +1,343 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		0292A6CB9874254CF50E9E36 /* QuickStartAppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6AC13265E3CF9A8F2A126C1E /* QuickStartAppDelegate.swift */; };
+		2DF6761E857A8CEBE8391F23 /* ReferenceRuntimeAdapter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1B3D8E8BDF79E951C0C6B8FC /* ReferenceRuntimeAdapter.swift */; };
+		4CA34BAFA3F94C8DB0CB78B5 /* AgentChatKit in Frameworks */ = {isa = PBXBuildFile; productRef = 30D9458587208AD6CF4E6ED3 /* AgentChatKit */; };
+		6C81F504DBA424C1B74E4CD6 /* QuickStartConversationViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28437A7B7B4CA13D2B1ADBA4 /* QuickStartConversationViewController.swift */; };
+		F6EC48A800B05EBA507A313C /* QuickStartSceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6E3F57191098449A7258CD7 /* QuickStartSceneDelegate.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		1B3D8E8BDF79E951C0C6B8FC /* ReferenceRuntimeAdapter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReferenceRuntimeAdapter.swift; sourceTree = "<group>"; };
+		28437A7B7B4CA13D2B1ADBA4 /* QuickStartConversationViewController.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickStartConversationViewController.swift; sourceTree = "<group>"; };
+		6AC13265E3CF9A8F2A126C1E /* QuickStartAppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickStartAppDelegate.swift; sourceTree = "<group>"; };
+		AE2E5C77E128ED922DA8C724 /* agent-chat-kit */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "agent-chat-kit"; path = ../..; sourceTree = SOURCE_ROOT; };
+		CA69975042EBF06876AD9488 /* AgentChatQuickStart.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = AgentChatQuickStart.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		D6E3F57191098449A7258CD7 /* QuickStartSceneDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QuickStartSceneDelegate.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		15DBBD3276ACA3B84EBFAA0D /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				4CA34BAFA3F94C8DB0CB78B5 /* AgentChatKit in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		27830959FEE0CD25968BE70E /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				AE2E5C77E128ED922DA8C724 /* agent-chat-kit */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		78A774D2A695965DEBADA44A /* App */ = {
+			isa = PBXGroup;
+			children = (
+				6AC13265E3CF9A8F2A126C1E /* QuickStartAppDelegate.swift */,
+				28437A7B7B4CA13D2B1ADBA4 /* QuickStartConversationViewController.swift */,
+				D6E3F57191098449A7258CD7 /* QuickStartSceneDelegate.swift */,
+				1B3D8E8BDF79E951C0C6B8FC /* ReferenceRuntimeAdapter.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		84064F52D6E6BB02E6675364 = {
+			isa = PBXGroup;
+			children = (
+				78A774D2A695965DEBADA44A /* App */,
+				27830959FEE0CD25968BE70E /* Packages */,
+				9A00E635D732ABB0C65A7B34 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		9A00E635D732ABB0C65A7B34 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				CA69975042EBF06876AD9488 /* AgentChatQuickStart.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		D339872ECA99D3BB22566923 /* AgentChatQuickStart */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 9F988ABFA4B4EE2DB94AD869 /* Build configuration list for PBXNativeTarget "AgentChatQuickStart" */;
+			buildPhases = (
+				91EA6F5D5E3345B4BB856B5F /* Sources */,
+				15DBBD3276ACA3B84EBFAA0D /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = AgentChatQuickStart;
+			packageProductDependencies = (
+				30D9458587208AD6CF4E6ED3 /* AgentChatKit */,
+			);
+			productName = AgentChatQuickStart;
+			productReference = CA69975042EBF06876AD9488 /* AgentChatQuickStart.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		BB90C0511DAC2E456A2291F3 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1600;
+				TargetAttributes = {
+				};
+			};
+			buildConfigurationList = 9B938F267F703DEF34F73953 /* Build configuration list for PBXProject "AgentChatQuickStart" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 84064F52D6E6BB02E6675364;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				55B1C81485717BB20A74D946 /* XCLocalSwiftPackageReference "../.." */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 9A00E635D732ABB0C65A7B34 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				D339872ECA99D3BB22566923 /* AgentChatQuickStart */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		91EA6F5D5E3345B4BB856B5F /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				0292A6CB9874254CF50E9E36 /* QuickStartAppDelegate.swift in Sources */,
+				6C81F504DBA424C1B74E4CD6 /* QuickStartConversationViewController.swift in Sources */,
+				F6EC48A800B05EBA507A313C /* QuickStartSceneDelegate.swift in Sources */,
+				2DF6761E857A8CEBE8391F23 /* ReferenceRuntimeAdapter.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		1A180F170BF76BB6498E8548 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = AgentChatQuickStart;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jacklvcoder.AgentChatQuickStart;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		2710A813923C3237E39CC584 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = AgentChatQuickStart;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = com.jacklvcoder.AgentChatQuickStart;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 6.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		42F97D51F6576679415D25DD /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		BD2C35F3F80985B171F99582 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		9B938F267F703DEF34F73953 /* Build configuration list for PBXProject "AgentChatQuickStart" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				BD2C35F3F80985B171F99582 /* Debug */,
+				42F97D51F6576679415D25DD /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		9F988ABFA4B4EE2DB94AD869 /* Build configuration list for PBXNativeTarget "AgentChatQuickStart" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				2710A813923C3237E39CC584 /* Debug */,
+				1A180F170BF76BB6498E8548 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		55B1C81485717BB20A74D946 /* XCLocalSwiftPackageReference "../.." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = ../..;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		30D9458587208AD6CF4E6ED3 /* AgentChatKit */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AgentChatKit;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = BB90C0511DAC2E456A2291F3 /* Project object */;
+}

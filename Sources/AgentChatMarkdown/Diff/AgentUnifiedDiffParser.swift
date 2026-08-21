@@ -17,19 +17,61 @@ public struct AgentUnifiedDiffParseResult: Hashable, Codable, Sendable {
     }
 }
 
+/// A caller-owned identity for a revision of diff content.
+public struct AgentUnifiedDiffCacheKey: Hashable, Codable, Sendable {
+    /// Stable content owner, typically a block identifier.
+    public var identifier: String
+    /// Monotonic content revision.
+    public var revision: Int64
+
+    /// Creates a diff cache key.
+    public init(identifier: String, revision: Int64) {
+        self.identifier = identifier
+        self.revision = revision
+    }
+}
+
 /// Parses unified diffs away from the main actor with bounded inline output.
 public actor AgentUnifiedDiffParser {
     private let maximumLines: Int
     private let maximumUTF8Count: Int
+    private let cacheCapacity: Int
+    private var cachedResults: [AgentUnifiedDiffCacheKey: AgentUnifiedDiffParseResult] = [:]
+    private var cacheOrder: [AgentUnifiedDiffCacheKey] = []
 
     /// Creates a bounded parser.
     public init(maximumLines: Int = 1_000, maximumUTF8Count: Int = 150_000) {
         self.maximumLines = max(1, maximumLines)
         self.maximumUTF8Count = max(1, maximumUTF8Count)
+        self.cacheCapacity = 64
+    }
+
+    /// Creates a bounded parser with a caller-selected cache capacity.
+    public init(
+        maximumLines: Int = 1_000,
+        maximumUTF8Count: Int = 150_000,
+        cacheCapacity: Int
+    ) {
+        self.maximumLines = max(1, maximumLines)
+        self.maximumUTF8Count = max(1, maximumUTF8Count)
+        self.cacheCapacity = max(1, cacheCapacity)
     }
 
     /// Parses multi-file, rename, binary, hunk, and no-newline markers.
     public func parse(_ source: String) -> AgentUnifiedDiffParseResult {
+        parse(source, cacheKey: nil)
+    }
+
+    /// Parses content and optionally reuses the result for a caller-owned revision.
+    public func parse(
+        _ source: String,
+        cacheKey: AgentUnifiedDiffCacheKey?
+    ) -> AgentUnifiedDiffParseResult {
+        if let cacheKey, let cached = cachedResults[cacheKey] {
+            cacheOrder.removeAll { $0 == cacheKey }
+            cacheOrder.append(cacheKey)
+            return cached
+        }
         let bounded = boundedSource(source)
         let lines = bounded.text.split(separator: "\n", omittingEmptySubsequences: false).map(
             String.init)
@@ -128,11 +170,40 @@ public actor AgentUnifiedDiffParser {
         }
         flushFile()
 
-        return .init(
+        let result = AgentUnifiedDiffParseResult(
             files: files,
             rawFallback: files.isEmpty ? bounded.text : nil,
             wasTruncated: bounded.truncated
         )
+        if let cacheKey { insert(result, for: cacheKey) }
+        return result
+    }
+
+    /// Removes cached revisions for caller-owned identifiers.
+    public func removeCachedResults(identifiers: Set<String>) {
+        cacheOrder.removeAll { key in
+            guard identifiers.contains(key.identifier) else { return false }
+            cachedResults[key] = nil
+            return true
+        }
+    }
+
+    /// Releases all cached diff results after a conversation closes or memory pressure occurs.
+    public func removeAllCachedResults() {
+        cachedResults.removeAll(keepingCapacity: true)
+        cacheOrder.removeAll(keepingCapacity: true)
+    }
+
+    private func insert(
+        _ result: AgentUnifiedDiffParseResult,
+        for key: AgentUnifiedDiffCacheKey
+    ) {
+        cachedResults[key] = result
+        cacheOrder.removeAll { $0 == key }
+        cacheOrder.append(key)
+        while cacheOrder.count > cacheCapacity {
+            cachedResults[cacheOrder.removeFirst()] = nil
+        }
     }
 
     private func boundedSource(_ source: String) -> (text: String, truncated: Bool) {

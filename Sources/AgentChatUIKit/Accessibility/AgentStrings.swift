@@ -3,6 +3,8 @@ import Foundation
 enum AgentStrings {
     static var input: String { String(localized: "Input", bundle: .module) }
     static var output: String { String(localized: "Output", bundle: .module) }
+    static var image: String { String(localized: "Image", bundle: .module) }
+    static var results: String { String(localized: "results", bundle: .module) }
     static var payload: String { String(localized: "Payload", bundle: .module) }
     static var command: String { String(localized: "Command", bundle: .module) }
     static var fileSearch: String { String(localized: "File search", bundle: .module) }
@@ -33,6 +35,10 @@ enum AgentStrings {
     static var send: String { String(localized: "Send", bundle: .module) }
     static var stop: String { String(localized: "Stop", bundle: .module) }
     static var attach: String { String(localized: "Attach", bundle: .module) }
+    static var uploading: String { String(localized: "Uploading", bundle: .module) }
+    static var removeAttachment: String {
+        String(localized: "Remove attachment", bundle: .module)
+    }
     static var jumpToLatest: String { String(localized: "Jump to latest", bundle: .module) }
     static var offline: String { String(localized: "Offline", bundle: .module) }
     static var connecting: String { String(localized: "Connecting", bundle: .module) }
@@ -40,6 +46,18 @@ enum AgentStrings {
     static var assistant: String { String(localized: "Assistant", bundle: .module) }
     static var system: String { String(localized: "System", bundle: .module) }
     static var copyRawPayload: String { String(localized: "Copy raw payload", bundle: .module) }
+    static var copy: String { String(localized: "Copy", bundle: .module) }
+    static var showMore: String { String(localized: "Show more", bundle: .module) }
+    static var showLess: String { String(localized: "Show less", bundle: .module) }
+    static var code: String { String(localized: "Code", bundle: .module) }
+    static var codeTruncated: String { String(localized: "Code truncated", bundle: .module) }
+    static var copyCommand: String { String(localized: "Copy command", bundle: .module) }
+    static var copyOutput: String { String(localized: "Copy output", bundle: .module) }
+    static var copyRaw: String { String(localized: "Copy raw", bundle: .module) }
+    static var openFullOutput: String {
+        String(localized: "Open full output", bundle: .module)
+    }
+    static var openFullDiff: String { String(localized: "Open full diff", bundle: .module) }
     static var collapse: String { String(localized: "Collapse", bundle: .module) }
     static var created: String { String(localized: "Created", bundle: .module) }
     static var deleted: String { String(localized: "Deleted", bundle: .module) }
@@ -48,4 +66,12 @@ enum AgentStrings {
     static var moved: String { String(localized: "Moved", bundle: .module) }
     static var ran: String { String(localized: "Ran", bundle: .module) }
     static var read: String { String(localized: "Read", bundle: .module) }
+    static var thinking: String { String(localized: "Thinking", bundle: .module) }
+    static var thought: String { String(localized: "Thought", bundle: .module) }
+    static var thinkingFailed: String {
+        String(localized: "Thinking failed", bundle: .module)
+    }
+    static var thinkingCancelled: String {
+        String(localized: "Thinking cancelled", bundle: .module)
+    }
 }
