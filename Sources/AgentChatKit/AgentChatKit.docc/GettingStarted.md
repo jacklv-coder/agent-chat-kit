@@ -56,8 +56,9 @@ selected conversation's store, session, capabilities, and host actions into this
 
 Both the recommended table timeline and the optional collection timeline accept a host-provided
 ``AgentComposerProviding`` through `composer:` while keeping the original initializer and default
-``AgentComposerView`` behavior. See <doc:ComposerIntegration> for a complete implementation,
-real-time draft requirements, import routing, and accessibility responsibilities.
+``AgentComposerView`` behavior. Adopt ``AgentComposerInteracting`` for a fully interactive composer
+with live draft and hardware-keyboard integration. See <doc:ComposerIntegration> for a complete
+implementation, import routing, and accessibility responsibilities.
 
 `ReferenceRuntimeAdapter` is the complete implementation in `Examples/QuickStart`. Copy it first,
 then replace only its offline response logic with your SSE, WebSocket, or local-agent transport.
