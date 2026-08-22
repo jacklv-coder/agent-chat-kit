@@ -1850,11 +1850,19 @@ AgentComposerView
 public protocol AgentComposerProviding: AnyObject {
     var view: UIView { get }
     var actionStream: AsyncStream<AgentComposerAction> { get }
+    var currentState: AgentComposerState { get }
     func apply(_ state: AgentComposerState)
+    @discardableResult func focus() -> Bool
+    func performPrimaryAction()
 }
 ```
 
-宿主可完全替换输入区。
+宿主可完全替换输入区。`currentState` 必须返回编辑器中的实时草稿；`focus()` 与
+`performPrimaryAction()` 分别承接硬件键盘的聚焦及发送/停止操作。为保持旧有 conformer
+的源码兼容，SDK 为这三个新增要求提供保守的默认实现；完整的自定义 Composer 应覆盖它们。
+
+粘贴与拖放属于可选能力。需要接收 `NSItemProvider` 的 Composer 可额外实现
+`AgentComposerImportRouting`，不支持导入的实现无需提供该能力。
 
 ### 13.3 附件
 

@@ -120,6 +120,19 @@ public protocol AgentComposerProviding: AnyObject {
     func performPrimaryAction()
 }
 
+extension AgentComposerProviding {
+    /// Compatibility fallback for conformers created before live draft state was part of the
+    /// composer contract. Custom composers should override this with their editor's live state.
+    public var currentState: AgentComposerState { .init() }
+
+    /// Compatibility fallback for conformers that do not expose a focusable input control.
+    @discardableResult
+    public func focus() -> Bool { false }
+
+    /// Compatibility fallback for conformers that only emit actions from their own controls.
+    public func performPrimaryAction() {}
+}
+
 /// Optional paste and drop routing for composer implementations that accept item providers.
 @MainActor
 public protocol AgentComposerImportRouting: AnyObject {

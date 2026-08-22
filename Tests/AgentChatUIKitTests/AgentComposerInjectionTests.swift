@@ -6,6 +6,14 @@ import XCTest
 
 @MainActor
 final class AgentComposerInjectionTests: XCTestCase {
+    func testLegacyComposerConformerRetainsSourceCompatibleDefaults() {
+        let composer = LegacyComposer()
+
+        XCTAssertEqual(composer.currentState, AgentComposerState())
+        XCTAssertFalse(composer.focus())
+        composer.performPrimaryAction()
+    }
+
     func testTableControllerUsesInjectedComposerViewAndDefaultInitializer() {
         let store = makeStore(id: "table-injection")
         let composer = SpyComposer()
@@ -349,6 +357,16 @@ final class AgentComposerInjectionTests: XCTestCase {
         }
         return condition()
     }
+}
+
+@MainActor
+private final class LegacyComposer: AgentComposerProviding {
+    let view = UIView()
+    let actionStream = AsyncStream<AgentComposerAction> { continuation in
+        continuation.finish()
+    }
+
+    func apply(_ state: AgentComposerState) {}
 }
 
 @MainActor
