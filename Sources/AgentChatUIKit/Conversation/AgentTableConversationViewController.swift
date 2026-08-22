@@ -740,6 +740,7 @@ public final class AgentTableConversationViewController: UIViewController {
     private func handleComposer(_ action: AgentComposerAction) {
         switch action {
         case .send(let text, let attachments):
+            guard canSubmitComposer else { return }
             let pendingState = currentComposerState()
             let request = AgentSubmitRequest(
                 conversationID: store.snapshot.id,
@@ -876,6 +877,15 @@ public final class AgentTableConversationViewController: UIViewController {
             isConversationRunning
             && configuration.runtimeCapabilities.contains(.interrupt)
         return state
+    }
+
+    private var canSubmitComposer: Bool {
+        guard !isConversationRunning else { return false }
+        return switch store.snapshot.state {
+        case .connected, .idle: true
+        case .offline: configuration.allowsSendingWhileOffline
+        case .connecting, .failed: false
+        }
     }
 
     private var isConversationRunning: Bool {

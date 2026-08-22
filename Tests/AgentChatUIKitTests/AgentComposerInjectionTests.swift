@@ -148,6 +148,58 @@ final class AgentComposerInjectionTests: XCTestCase {
         XCTAssertTrue(composer.currentState.attachments.isEmpty)
     }
 
+    func testCustomComposerCannotSubmitWhileSendingIsUnavailable() async {
+        let tableComposer = SpyComposer()
+        let tableRecorder = ActionRecorder()
+        let tableController = AgentTableConversationViewController(
+            store: makeStore(id: "table-offline", state: .offline(message: "Offline")),
+            composer: tableComposer
+        )
+        tableController.actionHandler = { [tableRecorder] action in
+            tableRecorder.actions.append(action)
+        }
+        tableController.loadViewIfNeeded()
+
+        tableComposer.emit(.send(text: "blocked", attachments: []))
+        tableComposer.emit(.selectAccessory("table-probe"))
+        let tableProbeReceived = await waitUntil { tableRecorder.actions.count == 1 }
+        XCTAssertTrue(tableProbeReceived)
+        XCTAssertEqual(
+            tableRecorder.actions,
+            [
+                .host(
+                    .custom(
+                        kind: "agentchat.composer.accessory",
+                        payload: .object(["id": .string("table-probe")])))
+            ]
+        )
+
+        let collectionComposer = SpyComposer()
+        let collectionRecorder = ActionRecorder()
+        let collectionController = AgentConversationViewController(
+            store: makeStore(id: "collection-offline", state: .offline(message: "Offline")),
+            composer: collectionComposer
+        )
+        collectionController.actionHandler = { [collectionRecorder] action in
+            collectionRecorder.actions.append(action)
+        }
+        collectionController.loadViewIfNeeded()
+
+        collectionComposer.emit(.send(text: "blocked", attachments: []))
+        collectionComposer.emit(.selectAccessory("collection-probe"))
+        let collectionProbeReceived = await waitUntil { collectionRecorder.actions.count == 1 }
+        XCTAssertTrue(collectionProbeReceived)
+        XCTAssertEqual(
+            collectionRecorder.actions,
+            [
+                .host(
+                    .custom(
+                        kind: "agentchat.composer.accessory",
+                        payload: .object(["id": .string("collection-probe")])))
+            ]
+        )
+    }
+
     func testCustomComposerStopAndAccessoryRouteExpectedActions() async {
         let store = makeStore(id: "actions")
         let composer = SpyComposer()
@@ -330,9 +382,10 @@ final class AgentComposerInjectionTests: XCTestCase {
 
     private func makeStore(
         id: AgentConversationID,
-        turns: [AgentTurn] = []
+        turns: [AgentTurn] = [],
+        state: AgentConversationState = .connected
     ) -> AgentConversationStore {
-        AgentConversationStore(snapshot: .init(id: id, turns: turns, state: .connected))
+        AgentConversationStore(snapshot: .init(id: id, turns: turns, state: state))
     }
 
     private func makeTurn(id: AgentTurnID, state: AgentTurnState) -> AgentTurn {
