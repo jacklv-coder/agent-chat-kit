@@ -14,7 +14,10 @@ public final class AgentTableConversationViewController: UIViewController {
     private var theme: AgentChatTheme
     private let rendererRegistry: AgentBlockRendererRegistry
     private let tableView = UITableView(frame: .zero, style: .plain)
-    private let composer: AgentComposerView
+    private var composer: any AgentComposerProviding
+    private var composerView: UIView
+    private var lastComposerState = AgentComposerState()
+    private var isComposerSubmissionPending = false
     private let connectionBanner = UILabel()
     private let jumpToLatestButton = UIButton(type: .system)
     private let historyLoadingIndicator = UIActivityIndicatorView(style: .medium)
@@ -51,9 +54,36 @@ public final class AgentTableConversationViewController: UIViewController {
         self.configuration = configuration
         self.theme = theme
         self.rendererRegistry = rendererRegistry
-        self.composer = AgentComposerView(maximumHeight: configuration.maximumComposerHeight)
+        let composer = AgentComposerView(maximumHeight: configuration.maximumComposerHeight)
+        self.composer = composer
+        self.composerView = composer.view
         super.init(nibName: nil, bundle: nil)
-        composer.importHandler = { [weak self] providers, sourceView in
+        configureComposerImportRouting()
+    }
+
+    /// Creates a scene-scoped UITableView conversation controller with a host-provided composer.
+    public convenience init(
+        store: AgentConversationStore,
+        configuration: AgentConversationConfiguration = .init(),
+        theme: AgentChatTheme = .system,
+        rendererRegistry: AgentBlockRendererRegistry = .default,
+        composer: (any AgentComposerProviding)?
+    ) {
+        self.init(
+            store: store,
+            configuration: configuration,
+            theme: theme,
+            rendererRegistry: rendererRegistry
+        )
+        guard let composer else { return }
+        self.composer = composer
+        self.composerView = composer.view
+        configureComposerImportRouting()
+    }
+
+    private func configureComposerImportRouting() {
+        guard let importRouting = composer as? any AgentComposerImportRouting else { return }
+        importRouting.importHandler = { [weak self] providers, sourceView in
             guard let self else { return }
             self.delegate?.tableConversationViewController(
                 self,
@@ -216,7 +246,7 @@ public final class AgentTableConversationViewController: UIViewController {
         state.attachmentStatuses = state.attachmentStatuses.filter { id, _ in
             attachments.contains { $0.id == id }
         }
-        composer.apply(state)
+        applyComposerState(state)
     }
 
     /// Replaces upload or validation state for one pending attachment.
@@ -227,7 +257,7 @@ public final class AgentTableConversationViewController: UIViewController {
         var state = currentComposerState()
         guard state.attachments.contains(where: { $0.id == attachmentID }) else { return }
         state.attachmentStatuses[attachmentID] = status
-        composer.apply(state)
+        applyComposerState(state)
     }
 
     /// Replaces host-defined composer controls.
@@ -235,7 +265,7 @@ public final class AgentTableConversationViewController: UIViewController {
         configuration.composerAccessories = accessories
         var state = currentComposerState()
         state.accessories = accessories
-        composer.apply(state)
+        applyComposerState(state)
     }
 
     public override var keyCommands: [UIKeyCommand]? {
@@ -313,7 +343,7 @@ public final class AgentTableConversationViewController: UIViewController {
         bannerHeightConstraint = connectionBanner.heightAnchor.constraint(equalToConstant: 0)
         bannerHeightConstraint?.isActive = true
 
-        composer.translatesAutoresizingMaskIntoConstraints = false
+        composerView.translatesAutoresizingMaskIntoConstraints = false
 
         var jumpConfiguration = UIButton.Configuration.filled()
         jumpConfiguration.title = AgentStrings.jumpToLatest
@@ -336,7 +366,7 @@ public final class AgentTableConversationViewController: UIViewController {
 
         view.addSubview(connectionBanner)
         view.addSubview(tableView)
-        view.addSubview(composer)
+        view.addSubview(composerView)
         view.addSubview(historyLoadingIndicator)
         view.addSubview(jumpToLatestButton)
         view.keyboardLayoutGuide.followsUndockedKeyboard = true
@@ -347,16 +377,16 @@ public final class AgentTableConversationViewController: UIViewController {
             tableView.topAnchor.constraint(equalTo: connectionBanner.bottomAnchor),
             tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
-            composer.leadingAnchor.constraint(
+            tableView.bottomAnchor.constraint(equalTo: composerView.topAnchor, constant: -8),
+            composerView.leadingAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.leadingAnchor,
                 constant: 12
             ),
-            composer.trailingAnchor.constraint(
+            composerView.trailingAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.trailingAnchor,
                 constant: -12
             ),
-            composer.bottomAnchor.constraint(
+            composerView.bottomAnchor.constraint(
                 equalTo: view.keyboardLayoutGuide.topAnchor,
                 constant: -8
             ),
@@ -364,7 +394,10 @@ public final class AgentTableConversationViewController: UIViewController {
                 equalTo: view.safeAreaLayoutGuide.trailingAnchor,
                 constant: -16
             ),
-            jumpToLatestButton.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -10),
+            jumpToLatestButton.bottomAnchor.constraint(
+                equalTo: composerView.topAnchor,
+                constant: -10
+            ),
             historyLoadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
             historyLoadingIndicator.topAnchor.constraint(
                 equalTo: tableView.topAnchor, constant: 10),
@@ -408,10 +441,11 @@ public final class AgentTableConversationViewController: UIViewController {
     }
 
     private func observeComposer() {
+        guard composerTask == nil else { return }
+        let actionStream = composer.actionStream
         composerTask = Task { [weak self] in
-            guard let self else { return }
-            for await action in composer.actionStream {
-                guard !Task.isCancelled else { return }
+            for await action in actionStream {
+                guard !Task.isCancelled, let self else { return }
                 self.handleComposer(action)
             }
         }
@@ -708,6 +742,8 @@ public final class AgentTableConversationViewController: UIViewController {
     private func handleComposer(_ action: AgentComposerAction) {
         switch action {
         case .send(let text, let attachments):
+            guard canSubmitComposer else { return }
+            isComposerSubmissionPending = true
             let pendingState = currentComposerState()
             let request = AgentSubmitRequest(
                 conversationID: store.snapshot.id,
@@ -721,13 +757,19 @@ public final class AgentTableConversationViewController: UIViewController {
             submittedState.isRunning = configuration.runtimeCapabilities.contains(.interrupt)
             submittedState.canSend = false
             submittedState.statusMessage = AgentStrings.running
-            composer.apply(submittedState)
+            applyComposerState(submittedState)
             delegate?.tableConversationViewController(self, didUpdateDraftAttachments: [])
             perform(
                 .runtime(.submit(request)),
+                success: { [weak self] in
+                    guard let self, case .offline = self.store.snapshot.state else { return }
+                    self.isComposerSubmissionPending = false
+                    self.updateComposerState()
+                },
                 failure: { [weak self] in
                     guard let self else { return }
-                    self.composer.apply(pendingState)
+                    self.isComposerSubmissionPending = false
+                    self.applyComposerState(pendingState)
                     self.delegate?.tableConversationViewController(
                         self,
                         didUpdateDraftAttachments: pendingState.attachments
@@ -740,12 +782,14 @@ public final class AgentTableConversationViewController: UIViewController {
         case .pickAttachments:
             guard configuration.runtimeCapabilities.contains(.attachments) else { return }
             delegate?.tableConversationViewControllerDidRequestAttachments(
-                self, sourceView: composer)
+                self,
+                sourceView: composerView
+            )
         case .removeAttachment(let attachmentID):
             var state = currentComposerState()
             state.attachments.removeAll { $0.id == attachmentID }
             state.attachmentStatuses[attachmentID] = nil
-            composer.apply(state)
+            applyComposerState(state)
             delegate?.tableConversationViewController(
                 self,
                 didUpdateDraftAttachments: state.attachments
@@ -812,6 +856,9 @@ public final class AgentTableConversationViewController: UIViewController {
     }
 
     private func updateComposerState() {
+        if isConversationRunning {
+            isComposerSubmissionPending = false
+        }
         var state = currentComposerState()
         let canInterrupt = configuration.runtimeCapabilities.contains(.interrupt)
         state.isRunning = isConversationRunning && canInterrupt
@@ -833,15 +880,31 @@ public final class AgentTableConversationViewController: UIViewController {
             state.statusMessage = failure.message
             state.canSend = false
         }
-        composer.apply(state)
+        applyComposerState(state)
     }
 
     private func currentComposerState() -> AgentComposerState {
-        var state = composer.currentState
+        var state =
+            (composer as? any AgentComposerInteracting)?.currentState
+            ?? lastComposerState
         state.isRunning =
             isConversationRunning
             && configuration.runtimeCapabilities.contains(.interrupt)
         return state
+    }
+
+    private func applyComposerState(_ state: AgentComposerState) {
+        lastComposerState = state
+        composer.apply(state)
+    }
+
+    private var canSubmitComposer: Bool {
+        guard !isComposerSubmissionPending, !isConversationRunning else { return false }
+        return switch store.snapshot.state {
+        case .connected, .idle: true
+        case .offline: configuration.allowsSendingWhileOffline
+        case .connecting, .failed: false
+        }
     }
 
     private var isConversationRunning: Bool {
@@ -1120,10 +1183,19 @@ public final class AgentTableConversationViewController: UIViewController {
         resolvingApprovalIDs.formIntersection(unresolved)
     }
 
-    @objc private func sendFromKeyboard() { composer.submitCurrentInput() }
-    @objc private func focusComposer() { composer.focus() }
+    @objc func sendFromKeyboard() {
+        (composer as? any AgentComposerInteracting)?.performPrimaryAction()
+    }
 
-    @objc private func stopFromKeyboard() {
+    @objc func focusComposer() {
+        if let composer = composer as? any AgentComposerInteracting {
+            _ = composer.focus()
+        } else {
+            _ = composerView.becomeFirstResponder()
+        }
+    }
+
+    @objc func stopFromKeyboard() {
         guard isConversationRunning else { return }
         handleComposer(.stop)
     }

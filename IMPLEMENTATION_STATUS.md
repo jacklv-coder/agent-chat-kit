@@ -70,6 +70,8 @@ code, tests, demo path, and documentation are present.
 - [x] Default multiline composer, Send/Stop, draft and attachment metadata
 - [x] Rich composer attachment upload/retry/removal, host accessories, file paste/import routing,
   context status, and offline draft preservation
+- [x] Host composer injection for both timeline controllers through a concrete-type-free state,
+  action, focus, primary-action, and optional item-provider routing contract
 - [x] Interactive Mock Runtime submit flow with thinking, tools, and streaming Markdown results
 - [x] Tab-based Demo with a conversation-list first tab, UITableView chat details, and a dedicated
   Test Lab tab

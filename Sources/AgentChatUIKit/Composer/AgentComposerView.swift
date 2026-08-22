@@ -113,6 +113,30 @@ public protocol AgentComposerProviding: AnyObject {
     func apply(_ state: AgentComposerState)
 }
 
+/// Optional interactive capabilities used by conversation controllers for live draft and keyboard
+/// command integration.
+///
+/// Keeping these capabilities in a refinement preserves binary compatibility for existing
+/// `AgentComposerProviding` conformers. Fully interactive custom composers should conform to this
+/// protocol in addition to `AgentComposerProviding`.
+@MainActor
+public protocol AgentComposerInteracting: AgentComposerProviding {
+    /// The latest state, including draft text currently being edited by the user.
+    var currentState: AgentComposerState { get }
+    /// Focuses the primary input control when possible.
+    @discardableResult
+    func focus() -> Bool
+    /// Performs the current primary action, such as Send or Stop.
+    func performPrimaryAction()
+}
+
+/// Optional paste and drop routing for composer implementations that accept item providers.
+@MainActor
+public protocol AgentComposerImportRouting: AnyObject {
+    /// Called when the composer receives non-text item providers from paste or drag and drop.
+    var importHandler: (([NSItemProvider], UIView) -> Void)? { get set }
+}
+
 /// A host-injected attachment picker. Core never owns attachment bytes or permissions.
 @MainActor
 public protocol AgentAttachmentPicking: AnyObject {
@@ -122,7 +146,7 @@ public protocol AgentAttachmentPicking: AnyObject {
 
 /// The default multiline, Dynamic Type composer.
 @MainActor
-public final class AgentComposerView: UIView, AgentComposerProviding {
+public final class AgentComposerView: UIView, AgentComposerInteracting, AgentComposerImportRouting {
     /// The view exposed by `AgentComposerProviding`.
     public var view: UIView { self }
     /// The stream of send, stop, attachment, and accessory actions.
@@ -148,7 +172,7 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
     private var textHeightConstraint: NSLayoutConstraint?
     private let maximumHeight: CGFloat
 
-    var currentState: AgentComposerState {
+    public var currentState: AgentComposerState {
         var current = state
         current.text = textView.text
         return current
@@ -209,7 +233,10 @@ public final class AgentComposerView: UIView, AgentComposerProviding {
     @discardableResult
     public func focus() -> Bool { textView.becomeFirstResponder() }
 
-    func submitCurrentInput() { sendOrStop() }
+    /// Sends the current draft or stops the active run, according to the applied state.
+    public func performPrimaryAction() { sendOrStop() }
+
+    func submitCurrentInput() { performPrimaryAction() }
 
     @discardableResult
     func handleDroppedItemProviders(_ providers: [NSItemProvider]) -> Bool {
