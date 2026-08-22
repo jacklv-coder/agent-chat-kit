@@ -109,28 +109,25 @@ public protocol AgentComposerProviding: AnyObject {
     var view: UIView { get }
     /// A single stream of user actions.
     var actionStream: AsyncStream<AgentComposerAction> { get }
-    /// The latest state, including draft text currently being edited by the user.
-    var currentState: AgentComposerState { get }
     /// Applies the latest composer state.
     func apply(_ state: AgentComposerState)
+}
+
+/// Optional interactive capabilities used by conversation controllers for live draft and keyboard
+/// command integration.
+///
+/// Keeping these capabilities in a refinement preserves binary compatibility for existing
+/// `AgentComposerProviding` conformers. Fully interactive custom composers should conform to this
+/// protocol in addition to `AgentComposerProviding`.
+@MainActor
+public protocol AgentComposerInteracting: AgentComposerProviding {
+    /// The latest state, including draft text currently being edited by the user.
+    var currentState: AgentComposerState { get }
     /// Focuses the primary input control when possible.
     @discardableResult
     func focus() -> Bool
     /// Performs the current primary action, such as Send or Stop.
     func performPrimaryAction()
-}
-
-extension AgentComposerProviding {
-    /// Compatibility fallback for conformers created before live draft state was part of the
-    /// composer contract. Custom composers should override this with their editor's live state.
-    public var currentState: AgentComposerState { .init() }
-
-    /// Compatibility fallback for conformers that do not expose a focusable input control.
-    @discardableResult
-    public func focus() -> Bool { false }
-
-    /// Compatibility fallback for conformers that only emit actions from their own controls.
-    public func performPrimaryAction() {}
 }
 
 /// Optional paste and drop routing for composer implementations that accept item providers.
@@ -149,7 +146,7 @@ public protocol AgentAttachmentPicking: AnyObject {
 
 /// The default multiline, Dynamic Type composer.
 @MainActor
-public final class AgentComposerView: UIView, AgentComposerProviding, AgentComposerImportRouting {
+public final class AgentComposerView: UIView, AgentComposerInteracting, AgentComposerImportRouting {
     /// The view exposed by `AgentComposerProviding`.
     public var view: UIView { self }
     /// The stream of send, stop, attachment, and accessory actions.

@@ -16,6 +16,8 @@ public final class AgentConversationViewController: UIViewController {
     private let collectionView: UICollectionView
     private var composer: any AgentComposerProviding
     private var composerView: UIView
+    private var lastComposerState = AgentComposerState()
+    private var isComposerSubmissionPending = false
     private let connectionBanner = UILabel()
     private let jumpToLatestButton = UIButton(type: .system)
     private let historyLoadingIndicator = UIActivityIndicatorView(style: .medium)
@@ -260,7 +262,7 @@ public final class AgentConversationViewController: UIViewController {
         state.attachmentStatuses = state.attachmentStatuses.filter { id, _ in
             attachments.contains { $0.id == id }
         }
-        composer.apply(state)
+        applyComposerState(state)
     }
 
     /// Replaces upload or validation state for one pending attachment.
@@ -271,7 +273,7 @@ public final class AgentConversationViewController: UIViewController {
         var state = currentComposerState()
         guard state.attachments.contains(where: { $0.id == attachmentID }) else { return }
         state.attachmentStatuses[attachmentID] = status
-        composer.apply(state)
+        applyComposerState(state)
     }
 
     /// Replaces host-defined default composer controls.
@@ -279,7 +281,7 @@ public final class AgentConversationViewController: UIViewController {
         configuration.composerAccessories = accessories
         var state = currentComposerState()
         state.accessories = accessories
-        composer.apply(state)
+        applyComposerState(state)
     }
 
     public override var keyCommands: [UIKeyCommand]? {
@@ -771,6 +773,7 @@ public final class AgentConversationViewController: UIViewController {
         switch action {
         case .send(let text, let attachments):
             guard canSubmitComposer else { return }
+            isComposerSubmissionPending = true
             let pendingState = currentComposerState()
             let request = AgentSubmitRequest(
                 conversationID: store.snapshot.id,
@@ -784,13 +787,19 @@ public final class AgentConversationViewController: UIViewController {
             submittedState.isRunning = configuration.runtimeCapabilities.contains(.interrupt)
             submittedState.canSend = false
             submittedState.statusMessage = AgentStrings.running
-            composer.apply(submittedState)
+            applyComposerState(submittedState)
             delegate?.conversationViewController(self, didUpdateDraftAttachments: [])
             perform(
                 .runtime(.submit(request)),
+                success: { [weak self] in
+                    guard let self, case .offline = self.store.snapshot.state else { return }
+                    self.isComposerSubmissionPending = false
+                    self.updateComposerState()
+                },
                 failure: { [weak self] in
                     guard let self else { return }
-                    self.composer.apply(pendingState)
+                    self.isComposerSubmissionPending = false
+                    self.applyComposerState(pendingState)
                     self.delegate?.conversationViewController(
                         self,
                         didUpdateDraftAttachments: pendingState.attachments
@@ -812,7 +821,7 @@ public final class AgentConversationViewController: UIViewController {
             var state = currentComposerState()
             state.attachments.removeAll { $0.id == attachmentID }
             state.attachmentStatuses[attachmentID] = nil
-            composer.apply(state)
+            applyComposerState(state)
             delegate?.conversationViewController(
                 self,
                 didUpdateDraftAttachments: state.attachments
@@ -879,6 +888,9 @@ public final class AgentConversationViewController: UIViewController {
     }
 
     private func updateComposerState() {
+        if isConversationRunning {
+            isComposerSubmissionPending = false
+        }
         var state = currentComposerState()
         let canInterrupt = configuration.runtimeCapabilities.contains(.interrupt)
         state.isRunning = isConversationRunning && canInterrupt
@@ -900,19 +912,26 @@ public final class AgentConversationViewController: UIViewController {
             state.statusMessage = failure.message
             state.canSend = false
         }
-        composer.apply(state)
+        applyComposerState(state)
     }
 
     private func currentComposerState() -> AgentComposerState {
-        var state = composer.currentState
+        var state =
+            (composer as? any AgentComposerInteracting)?.currentState
+            ?? lastComposerState
         state.isRunning =
             isConversationRunning
             && configuration.runtimeCapabilities.contains(.interrupt)
         return state
     }
 
+    private func applyComposerState(_ state: AgentComposerState) {
+        lastComposerState = state
+        composer.apply(state)
+    }
+
     private var canSubmitComposer: Bool {
-        guard !isConversationRunning else { return false }
+        guard !isComposerSubmissionPending, !isConversationRunning else { return false }
         return switch store.snapshot.state {
         case .connected, .idle: true
         case .offline: configuration.allowsSendingWhileOffline
@@ -1125,9 +1144,17 @@ public final class AgentConversationViewController: UIViewController {
         resolvingApprovalIDs.formIntersection(unresolved)
     }
 
-    @objc func sendFromKeyboard() { composer.performPrimaryAction() }
+    @objc func sendFromKeyboard() {
+        (composer as? any AgentComposerInteracting)?.performPrimaryAction()
+    }
 
-    @objc func focusComposer() { _ = composer.focus() }
+    @objc func focusComposer() {
+        if let composer = composer as? any AgentComposerInteracting {
+            _ = composer.focus()
+        } else {
+            _ = composerView.becomeFirstResponder()
+        }
+    }
 
     @objc func stopFromKeyboard() {
         guard isConversationRunning else { return }

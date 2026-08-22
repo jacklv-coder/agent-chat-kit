@@ -2671,50 +2671,6 @@
             ]
           },
           {
-            "kind": "Var",
-            "name": "currentState",
-            "printedName": "currentState",
-            "children": [
-              {
-                "kind": "TypeNominal",
-                "name": "AgentComposerState",
-                "printedName": "AgentChatUIKit.AgentComposerState",
-                "usr": "s:14AgentChatUIKit0A13ComposerStateV"
-              }
-            ],
-            "declKind": "Var",
-            "usr": "s:14AgentChatUIKit0A17ComposerProvidingP12currentStateAA0adG0Vvp",
-            "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP12currentStateAA0adG0Vvp",
-            "moduleName": "AgentChatUIKit",
-            "protocolReq": true,
-            "declAttributes": [
-              "Custom"
-            ],
-            "accessors": [
-              {
-                "kind": "Accessor",
-                "name": "Get",
-                "printedName": "Get()",
-                "children": [
-                  {
-                    "kind": "TypeNominal",
-                    "name": "AgentComposerState",
-                    "printedName": "AgentChatUIKit.AgentComposerState",
-                    "usr": "s:14AgentChatUIKit0A13ComposerStateV"
-                  }
-                ],
-                "declKind": "Accessor",
-                "usr": "s:14AgentChatUIKit0A17ComposerProvidingP12currentStateAA0adG0Vvg",
-                "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP12currentStateAA0adG0Vvg",
-                "moduleName": "AgentChatUIKit",
-                "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerProviding>",
-                "protocolReq": true,
-                "reqNewWitnessTableEntry": true,
-                "accessorKind": "get"
-              }
-            ]
-          },
-          {
             "kind": "Function",
             "name": "apply",
             "printedName": "apply(_:)",
@@ -2734,54 +2690,6 @@
             "declKind": "Func",
             "usr": "s:14AgentChatUIKit0A17ComposerProvidingP5applyyyAA0aD5StateVF",
             "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP5applyyyAA0aD5StateVF",
-            "moduleName": "AgentChatUIKit",
-            "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerProviding>",
-            "protocolReq": true,
-            "declAttributes": [
-              "Custom"
-            ],
-            "reqNewWitnessTableEntry": true,
-            "funcSelfKind": "NonMutating"
-          },
-          {
-            "kind": "Function",
-            "name": "focus",
-            "printedName": "focus()",
-            "children": [
-              {
-                "kind": "TypeNominal",
-                "name": "Bool",
-                "printedName": "Swift.Bool",
-                "usr": "s:Sb"
-              }
-            ],
-            "declKind": "Func",
-            "usr": "s:14AgentChatUIKit0A17ComposerProvidingP5focusSbyF",
-            "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP5focusSbyF",
-            "moduleName": "AgentChatUIKit",
-            "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerProviding>",
-            "protocolReq": true,
-            "declAttributes": [
-              "DiscardableResult",
-              "Custom"
-            ],
-            "reqNewWitnessTableEntry": true,
-            "funcSelfKind": "NonMutating"
-          },
-          {
-            "kind": "Function",
-            "name": "performPrimaryAction",
-            "printedName": "performPrimaryAction()",
-            "children": [
-              {
-                "kind": "TypeNominal",
-                "name": "Void",
-                "printedName": "()"
-              }
-            ],
-            "declKind": "Func",
-            "usr": "s:14AgentChatUIKit0A17ComposerProvidingP20performPrimaryActionyyF",
-            "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP20performPrimaryActionyyF",
             "moduleName": "AgentChatUIKit",
             "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerProviding>",
             "protocolReq": true,
@@ -2814,6 +2722,136 @@
             "printedName": "Copyable",
             "usr": "s:s8CopyableP",
             "mangledName": "$ss8CopyableP"
+          }
+        ]
+      },
+      {
+        "kind": "TypeDecl",
+        "name": "AgentComposerInteracting",
+        "printedName": "AgentComposerInteracting",
+        "children": [
+          {
+            "kind": "Var",
+            "name": "currentState",
+            "printedName": "currentState",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "AgentComposerState",
+                "printedName": "AgentChatUIKit.AgentComposerState",
+                "usr": "s:14AgentChatUIKit0A13ComposerStateV"
+              }
+            ],
+            "declKind": "Var",
+            "usr": "s:14AgentChatUIKit0A19ComposerInteractingP12currentStateAA0adG0Vvp",
+            "mangledName": "$s14AgentChatUIKit0A19ComposerInteractingP12currentStateAA0adG0Vvp",
+            "moduleName": "AgentChatUIKit",
+            "protocolReq": true,
+            "declAttributes": [
+              "Custom"
+            ],
+            "accessors": [
+              {
+                "kind": "Accessor",
+                "name": "Get",
+                "printedName": "Get()",
+                "children": [
+                  {
+                    "kind": "TypeNominal",
+                    "name": "AgentComposerState",
+                    "printedName": "AgentChatUIKit.AgentComposerState",
+                    "usr": "s:14AgentChatUIKit0A13ComposerStateV"
+                  }
+                ],
+                "declKind": "Accessor",
+                "usr": "s:14AgentChatUIKit0A19ComposerInteractingP12currentStateAA0adG0Vvg",
+                "mangledName": "$s14AgentChatUIKit0A19ComposerInteractingP12currentStateAA0adG0Vvg",
+                "moduleName": "AgentChatUIKit",
+                "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerInteracting>",
+                "protocolReq": true,
+                "reqNewWitnessTableEntry": true,
+                "accessorKind": "get"
+              }
+            ]
+          },
+          {
+            "kind": "Function",
+            "name": "focus",
+            "printedName": "focus()",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Bool",
+                "printedName": "Swift.Bool",
+                "usr": "s:Sb"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:14AgentChatUIKit0A19ComposerInteractingP5focusSbyF",
+            "mangledName": "$s14AgentChatUIKit0A19ComposerInteractingP5focusSbyF",
+            "moduleName": "AgentChatUIKit",
+            "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerInteracting>",
+            "protocolReq": true,
+            "declAttributes": [
+              "DiscardableResult",
+              "Custom"
+            ],
+            "reqNewWitnessTableEntry": true,
+            "funcSelfKind": "NonMutating"
+          },
+          {
+            "kind": "Function",
+            "name": "performPrimaryAction",
+            "printedName": "performPrimaryAction()",
+            "children": [
+              {
+                "kind": "TypeNominal",
+                "name": "Void",
+                "printedName": "()"
+              }
+            ],
+            "declKind": "Func",
+            "usr": "s:14AgentChatUIKit0A19ComposerInteractingP20performPrimaryActionyyF",
+            "mangledName": "$s14AgentChatUIKit0A19ComposerInteractingP20performPrimaryActionyyF",
+            "moduleName": "AgentChatUIKit",
+            "genericSig": "<Self where Self : AgentChatUIKit.AgentComposerInteracting>",
+            "protocolReq": true,
+            "declAttributes": [
+              "Custom"
+            ],
+            "reqNewWitnessTableEntry": true,
+            "funcSelfKind": "NonMutating"
+          }
+        ],
+        "declKind": "Protocol",
+        "usr": "s:14AgentChatUIKit0A19ComposerInteractingP",
+        "mangledName": "$s14AgentChatUIKit0A19ComposerInteractingP",
+        "moduleName": "AgentChatUIKit",
+        "genericSig": "<Self : AgentChatUIKit.AgentComposerProviding>",
+        "declAttributes": [
+          "Custom"
+        ],
+        "conformances": [
+          {
+            "kind": "Conformance",
+            "name": "Escapable",
+            "printedName": "Escapable",
+            "usr": "s:s9EscapableP",
+            "mangledName": "$ss9EscapableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "Copyable",
+            "printedName": "Copyable",
+            "usr": "s:s8CopyableP",
+            "mangledName": "$ss8CopyableP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "AgentComposerProviding",
+            "printedName": "AgentComposerProviding",
+            "usr": "s:14AgentChatUIKit0A17ComposerProvidingP",
+            "mangledName": "$s14AgentChatUIKit0A17ComposerProvidingP"
           }
         ]
       },
@@ -3944,6 +3982,13 @@
             "printedName": "AgentComposerImportRouting",
             "usr": "s:14AgentChatUIKit0A21ComposerImportRoutingP",
             "mangledName": "$s14AgentChatUIKit0A21ComposerImportRoutingP"
+          },
+          {
+            "kind": "Conformance",
+            "name": "AgentComposerInteracting",
+            "printedName": "AgentComposerInteracting",
+            "usr": "s:14AgentChatUIKit0A19ComposerInteractingP",
+            "mangledName": "$s14AgentChatUIKit0A19ComposerInteractingP"
           },
           {
             "kind": "Conformance",

@@ -35,7 +35,9 @@ draft and reports the restored attachments again.
 
 ## Replace the composer
 
-For a fully custom input surface, implement ``AgentComposerProviding``. The conversation controller
+For a fully custom input surface, implement ``AgentComposerInteracting``. Its base
+``AgentComposerProviding`` contract supplies the view, action stream, and applied state, while the
+refinement supplies live draft and hardware-keyboard behavior. The conversation controller
 installs `composer.view`, applies ``AgentComposerState`` whenever draft or runtime state changes, and
 consumes the composer's single ``AgentComposerProviding/actionStream``. The following implementation
 shows the complete semantic bridge; a production host can replace its visual setup with an existing
@@ -46,7 +48,7 @@ import AgentChatKit
 import UIKit
 
 @MainActor
-final class ProductComposer: UIView, AgentComposerProviding, AgentComposerImportRouting {
+final class ProductComposer: UIView, AgentComposerInteracting, AgentComposerImportRouting {
     private let editor = UITextView()
     private var state = AgentComposerState()
     private let continuation: AsyncStream<AgentComposerAction>.Continuation

@@ -6,12 +6,11 @@ import XCTest
 
 @MainActor
 final class AgentComposerInjectionTests: XCTestCase {
-    func testLegacyComposerConformerRetainsSourceCompatibleDefaults() {
+    func testLegacyComposerConformerRemainsSourceCompatible() {
         let composer = LegacyComposer()
 
-        XCTAssertEqual(composer.currentState, AgentComposerState())
-        XCTAssertFalse(composer.focus())
-        composer.performPrimaryAction()
+        composer.apply(.init(text: "compatible"))
+        XCTAssertNotNil(composer.view)
     }
 
     func testTableControllerUsesInjectedComposerViewAndDefaultInitializer() {
@@ -198,6 +197,58 @@ final class AgentComposerInjectionTests: XCTestCase {
                         payload: .object(["id": .string("collection-probe")])))
             ]
         )
+    }
+
+    func testRapidCustomComposerSendsProduceOnlyOneSubmitUntilRuntimeStarts() async {
+        let composer = SpyComposer()
+        let recorder = ActionRecorder()
+        let controller = AgentConversationViewController(
+            store: makeStore(id: "deduplicated-send"),
+            composer: composer
+        )
+        controller.actionHandler = { [recorder] action in recorder.actions.append(action) }
+        controller.loadViewIfNeeded()
+
+        composer.emit(.send(text: "first", attachments: []))
+        composer.emit(.send(text: "second", attachments: []))
+
+        let firstSubmitReceived = await waitUntil { recorder.actions.count == 1 }
+        XCTAssertTrue(firstSubmitReceived)
+        try? await Task.sleep(for: .milliseconds(50))
+        XCTAssertEqual(
+            recorder.actions,
+            [
+                .runtime(
+                    .submit(
+                        .init(
+                            conversationID: "deduplicated-send",
+                            text: "first",
+                            attachments: []
+                        )
+                    )
+                )
+            ]
+        )
+    }
+
+    func testOfflineQueueAcceptsAnotherSendAfterPreviousSubmitCompletes() async {
+        let composer = SpyComposer()
+        let recorder = ActionRecorder()
+        let controller = AgentConversationViewController(
+            store: makeStore(id: "offline-queue", state: .offline(message: "Queued")),
+            configuration: .init(allowsSendingWhileOffline: true),
+            composer: composer
+        )
+        controller.actionHandler = { [recorder] action in recorder.actions.append(action) }
+        controller.loadViewIfNeeded()
+
+        composer.emit(.send(text: "first", attachments: []))
+        let firstSubmitReceived = await waitUntil { recorder.actions.count == 1 }
+        XCTAssertTrue(firstSubmitReceived)
+
+        composer.emit(.send(text: "second", attachments: []))
+        let secondSubmitReceived = await waitUntil { recorder.actions.count == 2 }
+        XCTAssertTrue(secondSubmitReceived)
     }
 
     func testCustomComposerStopAndAccessoryRouteExpectedActions() async {
@@ -423,7 +474,7 @@ private final class LegacyComposer: AgentComposerProviding {
 }
 
 @MainActor
-private class SpyComposer: AgentComposerProviding {
+private class SpyComposer: AgentComposerInteracting {
     let view = UIView()
     private let stream: AsyncStream<AgentComposerAction>
     private let continuation: AsyncStream<AgentComposerAction>.Continuation
