@@ -25,6 +25,8 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Changed
 
+- Pinned Swift Markdown 0.6.0 so the package remains resolvable with the documented Xcode 16
+  minimum toolchain.
 - Reorganized the Demo into Chats and Test Lab tabs. Chats now starts from a recent-conversation
   list and pushes the production `UITableView` timeline for interactive message testing.
 - Rebuilt the composer as a host-extensible multiline surface with attachment upload states,
