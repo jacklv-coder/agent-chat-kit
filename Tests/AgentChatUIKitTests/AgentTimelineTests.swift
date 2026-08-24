@@ -2251,16 +2251,33 @@ final class AgentTimelineTests: XCTestCase {
                 $0.accessibilityIdentifier == "AgentActivityEventTitle"
             } as? UILabel
         )
-        let subtitle = try XCTUnwrap(
-            cell.contentView.allSubviews.first {
-                $0.accessibilityIdentifier == "AgentActivityEventSubtitle"
-            } as? UILabel
+        let stateIcon = try XCTUnwrap(
+            cell.contentView.allSubviews.compactMap { $0 as? UIImageView }.first {
+                $0.image == UIImage(systemName: "checkmark.circle.fill")
+            }
         )
 
         XCTAssertEqual(event.layer.cornerRadius, 14)
         XCTAssertEqual(icon.image, UIImage(systemName: "apple.terminal"))
-        XCTAssertEqual(title.text, "Build demo application")
-        XCTAssertEqual(subtitle.text, "xcodebuild · 7.2s")
+        let expectedIconDimension = min(32, max(20, ceil(title.font.lineHeight)))
+        XCTAssertEqual(
+            icon.constraints.first { $0.firstAttribute == .width }?.constant,
+            expectedIconDimension
+        )
+        XCTAssertEqual(title.text, "Build demo application  ·  xcodebuild · 7.2s")
+        XCTAssertEqual(title.numberOfLines, 0)
+        XCTAssertEqual(
+            title.font.pointSize,
+            UIFontMetrics(forTextStyle: .subheadline).scaledFont(
+                for: .systemFont(ofSize: 15, weight: .semibold)
+            ).pointSize,
+            accuracy: 0.01
+        )
+        XCTAssertEqual(stateIcon.tintColor, AgentChatTheme.system.colors.secondaryText)
+        XCTAssertEqual(
+            stateIcon.constraints.first { $0.firstAttribute == .width }?.constant,
+            expectedIconDimension
+        )
         let header = try XCTUnwrap(
             cell.contentView.allSubviews.first {
                 $0.accessibilityIdentifier == "AgentActivityEventHeader"
@@ -2357,9 +2374,130 @@ final class AgentTimelineTests: XCTestCase {
                 $0.accessibilityIdentifier == "AgentActivityEventTitle"
             } as? UILabel
         )
+        let icon = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventIcon"
+            } as? UIImageView
+        )
 
         XCTAssertEqual(event.layer.cornerRadius, 0)
-        XCTAssertEqual(title.text, AgentStrings.thinking)
+        XCTAssertEqual(title.text, "\(AgentStrings.thinking) Safe summary")
+        XCTAssertEqual(icon.tintColor, AgentChatTheme.system.colors.secondaryText)
+        XCTAssertEqual(
+            title.font.pointSize,
+            UIFont.preferredFont(forTextStyle: .subheadline).pointSize,
+            accuracy: 0.01
+        )
+    }
+
+    func testReasoningActivityInfersSemanticIconFromTitle() throws {
+        let block = AgentBlock(
+            id: "inferred-reasoning",
+            kind: .activity,
+            content: .activity(.init(title: "Runtime activity")),
+            state: .succeeded,
+            createdAt: .distantPast,
+            metadata: [
+                AgentBlockMetadataKey.displayTitle: .string("Reasoning completed")
+            ]
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: .distantPast
+        )
+        let renderer = AgentDefaultBlockRenderer(supportedKinds: [.activity])
+        let collectionView = UICollectionView(
+            frame: .init(x: 0, y: 0, width: 390, height: 844),
+            collectionViewLayout: fixedHeightLayout()
+        )
+        renderer.register(in: collectionView)
+        let cell = renderer.dequeueConfiguredCell(
+            from: collectionView,
+            at: .init(item: 0, section: 0),
+            context: renderContext(
+                turn: turn,
+                block: block,
+                toolPresentationStyle: .capsule
+            )
+        )
+        let event = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEvent"
+            }
+        )
+        let icon = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventIcon"
+            } as? UIImageView
+        )
+        let title = try XCTUnwrap(
+            cell.contentView.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventTitle"
+            } as? UILabel
+        )
+
+        XCTAssertEqual(event.layer.cornerRadius, 0)
+        XCTAssertEqual(icon.image, UIImage(systemName: "brain.head.profile"))
+        XCTAssertEqual(title.text, "Reasoning completed")
+    }
+
+    func testCompactHeaderScalesIconsAndExpandsAnOverflowingSummary() throws {
+        func makeHeader(isExpanded: Bool) -> AgentCompactEventHeaderControl {
+            AgentCompactEventHeaderControl(
+                icon: UIImage(systemName: "apple.terminal"),
+                iconTint: AgentChatTheme.system.colors.secondaryText,
+                title: "Ran a command with a deliberately long title that needs more space",
+                subtitle: "swift · 1.2s",
+                titleColor: AgentChatTheme.system.colors.primaryText,
+                subtitleColor: AgentChatTheme.system.colors.secondaryText,
+                textStyle: .subheadline,
+                contentSizeCategory: .accessibilityLarge,
+                state: .succeeded,
+                destructiveColor: AgentChatTheme.system.colors.destructive,
+                style: .capsule,
+                isExpanded: isExpanded,
+                hasDetails: true,
+                activation: {}
+            )
+        }
+
+        let collapsed = makeHeader(isExpanded: false)
+        let expanded = makeHeader(isExpanded: true)
+        let collapsedTitle = try XCTUnwrap(
+            collapsed.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventTitle"
+            } as? UILabel
+        )
+        let expandedTitle = try XCTUnwrap(
+            expanded.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventTitle"
+            } as? UILabel
+        )
+        let leadingIcon = try XCTUnwrap(
+            collapsed.allSubviews.first {
+                $0.accessibilityIdentifier == "AgentActivityEventIcon"
+            } as? UIImageView
+        )
+        let stateIcon = try XCTUnwrap(
+            collapsed.allSubviews.compactMap { $0 as? UIImageView }.first {
+                $0.image == UIImage(systemName: "checkmark.circle.fill")
+            }
+        )
+        let iconDimension = try XCTUnwrap(
+            leadingIcon.constraints.first { $0.firstAttribute == .width }?.constant
+        )
+
+        XCTAssertEqual(collapsedTitle.numberOfLines, 1)
+        XCTAssertEqual(expandedTitle.numberOfLines, 0)
+        XCTAssertTrue(collapsedTitle.text?.contains("swift · 1.2s") == true)
+        XCTAssertGreaterThan(iconDimension, 18)
+        XCTAssertEqual(
+            stateIcon.constraints.first { $0.firstAttribute == .width }?.constant,
+            iconDimension
+        )
     }
 
     func testCapsuleFailureExposesRetryAndRoutesTheBlockID() throws {

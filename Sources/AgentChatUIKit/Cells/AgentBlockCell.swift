@@ -401,7 +401,7 @@ private final class AgentBlockContentView: UIView {
         }
         let header = AgentCompactEventHeaderControl(
             icon: eventIcon(for: context.block),
-            iconTint: eventTint(for: context.block, theme: context.theme),
+            iconTint: context.theme.colors.secondaryText,
             title: title,
             subtitle: usesCapsulePresentation
                 ? compactEventSubtitle(for: context.block)
@@ -410,9 +410,11 @@ private final class AgentBlockContentView: UIView {
                 ? context.theme.colors.primaryText
                 : context.theme.colors.secondaryText,
             subtitleColor: context.theme.colors.secondaryText,
-            textStyle: context.theme.typography.body,
+            textStyle: context.theme.typography.detail,
+            contentSizeCategory: .init(
+                rawValue: context.environment.contentSizeCategory
+            ),
             state: context.block.state,
-            accentColor: context.theme.colors.accent,
             destructiveColor: context.theme.colors.destructive,
             style: isCapsule ? .capsule : .inline,
             isExpanded: expanded,
@@ -643,7 +645,17 @@ private final class AgentBlockContentView: UIView {
     }
 
     private func isReasoningActivity(_ block: AgentBlock) -> Bool {
-        metadataString(AgentBlockMetadataKey.activityKind, in: block) == "reasoning"
+        if let activityKind = metadataString(AgentBlockMetadataKey.activityKind, in: block) {
+            return activityKind.lowercased() == "reasoning"
+        }
+        guard case .activity(let activity) = block.content else { return false }
+        let title =
+            metadataString(AgentBlockMetadataKey.displayTitle, in: block)
+            ?? activity.title
+        let normalizedTitle = title.lowercased()
+        return normalizedTitle.contains("reasoning")
+            || normalizedTitle.contains("thinking")
+            || normalizedTitle.contains("思考")
     }
 
     private func reasoningTitle(for state: AgentBlockState) -> String {
@@ -736,19 +748,6 @@ private final class AgentBlockContentView: UIView {
             return fallback
         }
         return UIImage(systemName: "chevron.left.forwardslash.chevron.right")
-    }
-
-    private func eventTint(for block: AgentBlock, theme: AgentChatTheme) -> UIColor {
-        if case .failed = block.state { return theme.colors.destructive }
-        if case .running = block.state { return theme.colors.accent }
-        if case .streaming = block.state { return theme.colors.accent }
-        if case .tool(let value) = block.content {
-            let name = value.toolName.lowercased()
-            if name.contains("simulator") || name.contains("iphone") {
-                return theme.colors.accent
-            }
-        }
-        return theme.colors.secondaryText
     }
 
     private func shouldShowCompactEventState(_ state: AgentBlockState) -> Bool {
@@ -1288,8 +1287,8 @@ final class AgentCompactEventHeaderControl: UIControl {
         titleColor: UIColor,
         subtitleColor: UIColor,
         textStyle: UIFont.TextStyle,
+        contentSizeCategory: UIContentSizeCategory,
         state: AgentBlockState,
-        accentColor: UIColor,
         destructiveColor: UIColor,
         style: AgentToolPresentationStyle,
         isExpanded: Bool,
@@ -1313,74 +1312,96 @@ final class AgentCompactEventHeaderControl: UIControl {
         isAccessibilityElement = true
         isEnabled = hasDetails
         let isCapsule = style == .capsule
+        let fontTraits = UITraitCollection(preferredContentSizeCategory: contentSizeCategory)
+        let titleFont =
+            isCapsule
+            ? UIFontMetrics(forTextStyle: textStyle).scaledFont(
+                for: .systemFont(ofSize: 15, weight: .semibold),
+                compatibleWith: fontTraits
+            )
+            : .preferredFont(forTextStyle: textStyle, compatibleWith: fontTraits)
+        let subtitleFont = UIFont.preferredFont(
+            forTextStyle: .caption1,
+            compatibleWith: fontTraits
+        )
+        let iconDimension = min(32, max(20, ceil(titleFont.lineHeight)))
+        let symbolPointSize = min(28, max(16, titleFont.pointSize))
+        let disclosureDimension = min(24, max(16, ceil(iconDimension * 0.75)))
 
         let iconView = UIImageView(image: icon)
-        iconView.preferredSymbolConfiguration = .init(textStyle: .body, scale: .medium)
+        iconView.preferredSymbolConfiguration = .init(
+            pointSize: symbolPointSize,
+            weight: .regular,
+            scale: .medium
+        )
         iconView.tintColor = iconTint
         iconView.contentMode = .scaleAspectFit
         iconView.accessibilityIdentifier = "AgentActivityEventIcon"
         iconView.setContentHuggingPriority(.required, for: .horizontal)
         NSLayoutConstraint.activate([
-            iconView.widthAnchor.constraint(equalToConstant: 20),
-            iconView.heightAnchor.constraint(equalToConstant: 20),
+            iconView.widthAnchor.constraint(equalToConstant: iconDimension),
+            iconView.heightAnchor.constraint(equalToConstant: iconDimension),
         ])
 
         let titleLabel = UILabel()
-        titleLabel.font =
-            isCapsule
-            ? UIFontMetrics(forTextStyle: textStyle).scaledFont(
-                for: .systemFont(ofSize: 16, weight: .semibold)
-            )
-            : .preferredFont(forTextStyle: textStyle)
+        titleLabel.font = titleFont
         titleLabel.adjustsFontForContentSizeCategory = true
         titleLabel.textColor = titleColor
-        titleLabel.numberOfLines = 1
+        titleLabel.numberOfLines = hasDetails && !isExpanded ? 1 : 0
         titleLabel.lineBreakMode = .byTruncatingTail
-        titleLabel.text = title
+        let titleText = NSMutableAttributedString(
+            string: title,
+            attributes: [.font: titleFont, .foregroundColor: titleColor]
+        )
+        if let subtitle, !subtitle.isEmpty {
+            titleText.append(
+                NSAttributedString(
+                    string: isCapsule ? "  ·  " : " ",
+                    attributes: [.font: subtitleFont, .foregroundColor: subtitleColor]
+                )
+            )
+            titleText.append(
+                NSAttributedString(
+                    string: subtitle,
+                    attributes: [.font: subtitleFont, .foregroundColor: subtitleColor]
+                )
+            )
+        }
+        titleLabel.attributedText = titleText
         titleLabel.accessibilityIdentifier = "AgentActivityEventTitle"
-
-        let subtitleLabel = UILabel()
-        subtitleLabel.font = .preferredFont(forTextStyle: .subheadline)
-        subtitleLabel.adjustsFontForContentSizeCategory = true
-        subtitleLabel.textColor = subtitleColor
-        subtitleLabel.numberOfLines = 1
-        subtitleLabel.lineBreakMode = .byTruncatingMiddle
-        subtitleLabel.text = subtitle
-        subtitleLabel.isHidden = subtitle == nil
-        subtitleLabel.accessibilityIdentifier = "AgentActivityEventSubtitle"
-
-        let labels = UIStackView(arrangedSubviews: [titleLabel, subtitleLabel])
-        labels.axis = .vertical
-        labels.alignment = .fill
-        labels.spacing = 2
-        labels.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        titleLabel.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
 
         let disclosure = UIImageView(
             image: UIImage(systemName: isExpanded ? "chevron.up" : "chevron.down")
         )
-        disclosure.preferredSymbolConfiguration = .init(textStyle: .caption1, scale: .small)
+        disclosure.preferredSymbolConfiguration = .init(
+            pointSize: min(20, max(12, symbolPointSize * 0.75)),
+            weight: .medium,
+            scale: .small
+        )
         disclosure.tintColor = titleColor
         disclosure.contentMode = .scaleAspectFit
         disclosure.accessibilityIdentifier = "AgentActivityEventDisclosure"
         disclosure.isHidden = !hasDetails
         disclosure.setContentHuggingPriority(.required, for: .horizontal)
         NSLayoutConstraint.activate([
-            disclosure.widthAnchor.constraint(equalToConstant: 18),
-            disclosure.heightAnchor.constraint(equalToConstant: 18),
+            disclosure.widthAnchor.constraint(equalToConstant: disclosureDimension),
+            disclosure.heightAnchor.constraint(equalToConstant: disclosureDimension),
         ])
 
         let trailing = makeTrailingView(
             for: state,
             hasDetails: hasDetails,
             disclosure: disclosure,
-            accentColor: accentColor,
-            destructiveColor: destructiveColor,
+            iconColor: iconTint,
+            iconDimension: iconDimension,
+            symbolPointSize: symbolPointSize,
             isCapsule: isCapsule
         )
-        let stack = UIStackView(arrangedSubviews: [iconView, labels, trailing])
+        let stack = UIStackView(arrangedSubviews: [iconView, titleLabel, trailing])
         stack.axis = .horizontal
-        stack.alignment = .center
-        stack.spacing = isCapsule ? 10 : 8
+        stack.alignment = titleLabel.numberOfLines == 1 ? .center : .top
+        stack.spacing = isCapsule ? 9 : 7
         stack.isUserInteractionEnabled = false
         stack.translatesAutoresizingMaskIntoConstraints = false
         addSubview(stack)
@@ -1435,29 +1456,44 @@ final class AgentCompactEventHeaderControl: UIControl {
         for state: AgentBlockState,
         hasDetails: Bool,
         disclosure: UIImageView,
-        accentColor: UIColor,
-        destructiveColor: UIColor,
+        iconColor: UIColor,
+        iconDimension: CGFloat,
+        symbolPointSize: CGFloat,
         isCapsule: Bool
     ) -> UIView {
         guard isCapsule else { return disclosure }
+        let makeStateIcon: (String) -> UIImageView = { [self] name in
+            stateIcon(
+                name,
+                color: iconColor,
+                dimension: iconDimension,
+                pointSize: symbolPointSize
+            )
+        }
         let views: [UIView]
         switch state {
         case .queued:
-            views = [stateIcon("clock", color: .tertiaryLabel), disclosure]
+            views = [makeStateIcon("clock"), disclosure]
         case .streaming, .running:
             let indicator = UIActivityIndicatorView(style: .medium)
-            indicator.color = accentColor
+            indicator.color = iconColor
+            let scale = symbolPointSize / 20
+            indicator.transform = .init(scaleX: scale, y: scale)
             indicator.startAnimating()
             indicator.accessibilityIdentifier = "AgentActivityEventProgress"
+            NSLayoutConstraint.activate([
+                indicator.widthAnchor.constraint(equalToConstant: iconDimension),
+                indicator.heightAnchor.constraint(equalToConstant: iconDimension),
+            ])
             views = [indicator, disclosure]
         case .waitingForApproval:
-            views = [stateIcon("exclamationmark.shield", color: accentColor), disclosure]
+            views = [makeStateIcon("exclamationmark.shield"), disclosure]
         case .succeeded:
-            views = [stateIcon("checkmark.circle.fill", color: .systemGreen), disclosure]
+            views = [makeStateIcon("checkmark.circle.fill"), disclosure]
         case .failed:
-            views = [stateIcon("exclamationmark.circle", color: destructiveColor), disclosure]
+            views = [makeStateIcon("exclamationmark.circle"), disclosure]
         case .cancelled:
-            views = [stateIcon("xmark.circle", color: .tertiaryLabel), disclosure]
+            views = [makeStateIcon("xmark.circle"), disclosure]
         }
         disclosure.isHidden = !hasDetails
         let stack = UIStackView(arrangedSubviews: views)
@@ -1468,14 +1504,19 @@ final class AgentCompactEventHeaderControl: UIControl {
         return stack
     }
 
-    private func stateIcon(_ name: String, color: UIColor) -> UIImageView {
+    private func stateIcon(
+        _ name: String,
+        color: UIColor,
+        dimension: CGFloat,
+        pointSize: CGFloat
+    ) -> UIImageView {
         let view = UIImageView(image: UIImage(systemName: name))
-        view.preferredSymbolConfiguration = .init(pointSize: 18, weight: .semibold)
+        view.preferredSymbolConfiguration = .init(pointSize: pointSize, weight: .medium)
         view.tintColor = color
         view.contentMode = .scaleAspectFit
         NSLayoutConstraint.activate([
-            view.widthAnchor.constraint(equalToConstant: 22),
-            view.heightAnchor.constraint(equalToConstant: 22),
+            view.widthAnchor.constraint(equalToConstant: dimension),
+            view.heightAnchor.constraint(equalToConstant: dimension),
         ])
         return view
     }

@@ -25,6 +25,9 @@ All notable changes are documented here. This project follows Semantic Versionin
 
 ### Changed
 
+- Refined compact activity and tool rows with coordinated Dynamic Type typography and icon sizing,
+  a consistent neutral SF Symbol tint, and one-line collapsed summaries that reveal complete titles
+  when expanded; common reasoning/thinking titles are also recognized without semantic metadata.
 - Reorganized the Demo into Chats and Test Lab tabs. Chats now starts from a recent-conversation
   list and pushes the production `UITableView` timeline for interactive message testing.
 - Rebuilt the composer as a host-extensible multiline surface with attachment upload states,
