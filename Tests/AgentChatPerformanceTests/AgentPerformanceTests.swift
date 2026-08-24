@@ -2,6 +2,8 @@ import AgentChatCore
 import AgentChatMarkdown
 import XCTest
 
+@testable import AgentChatUIKit
+
 final class AgentPerformanceTests: XCTestCase {
     func testConstructsLongConversationFixture() {
         measure {
@@ -11,11 +13,33 @@ final class AgentPerformanceTests: XCTestCase {
                     id: .init(rawValue: "turn-\(turnIndex)"),
                     role: .assistant,
                     blocks: (0..<3).map { blockIndex in
-                        AgentBlock(
+                        let kind: AgentBlockKind
+                        let content: AgentBlockContent
+                        switch blockIndex {
+                        case 0:
+                            kind = .markdown
+                            content = .markdown(
+                                .init(markdown: "# Turn \(turnIndex)\n\nContent", isFinal: true)
+                            )
+                        case 1:
+                            kind = .tool
+                            content = .tool(
+                                .init(
+                                    toolName: "fixture.tool",
+                                    title: "Tool \(turnIndex)",
+                                    summary: "Completed"
+                                )
+                            )
+                        default:
+                            kind = .command
+                            content = .command(
+                                .init(command: "printf \(turnIndex)", output: .init())
+                            )
+                        }
+                        return AgentBlock(
                             id: .init(rawValue: "block-\(turnIndex)-\(blockIndex)"),
-                            kind: .markdown,
-                            content: .markdown(
-                                .init(markdown: "Content \(turnIndex)", isFinal: true)),
+                            kind: kind,
+                            content: content,
                             state: .succeeded,
                             createdAt: date
                         )
@@ -26,6 +50,38 @@ final class AgentPerformanceTests: XCTestCase {
             }
             XCTAssertEqual(turns.flatMap(\.blocks).count, 6_000)
         }
+    }
+
+    @MainActor
+    func testSustainedStreamingScenarioCoalescesTenMinutesOfTargetedDeltas() {
+        let deltaCount = 10 * 60 * 30
+        var flushCount = 0
+        var receivedPatchCount = 0
+        let scheduler = AgentUpdateScheduler(coalescingMilliseconds: 50) { update in
+            flushCount += 1
+            receivedPatchCount += update.patches.count
+            XCTAssertEqual(update.reconfiguredBlockIDs, ["streaming-block"])
+        }
+
+        for _ in 0..<deltaCount {
+            scheduler.enqueue(.reconfigureBlock("streaming-block"))
+        }
+        scheduler.flushImmediately()
+
+        XCTAssertEqual(flushCount, 1)
+        XCTAssertEqual(receivedPatchCount, deltaCount)
+    }
+
+    func testOneMegabyteCommandOutputRemainsBounded() {
+        let rawOutput = String(repeating: "0123456789abcdef\n", count: 65_536)
+        XCTAssertGreaterThan(rawOutput.utf8.count, 1_000_000)
+        var buffer = AgentTextBuffer()
+
+        buffer.append(rawOutput)
+
+        XCTAssertTrue(buffer.wasTruncated)
+        XCTAssertLessThanOrEqual(buffer.utf8Count, 200_000)
+        XCTAssertLessThanOrEqual(buffer.lineCount, 2_000)
     }
 
     func testLargeDiffUsesBoundedInlineResult() async {

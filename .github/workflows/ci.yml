@@ -5,7 +5,7 @@ on:
   pull_request:
 
 env:
-  DESTINATION: platform=iOS Simulator,name=iPhone 16 Pro,OS=latest
+  DESTINATION: platform=iOS Simulator,name=iPhone 16 Pro,OS=18.5
 
 jobs:
   package-build:
@@ -28,6 +28,8 @@ jobs:
 
   package-tests:
     runs-on: macos-15
+    env:
+      SNAPSHOT_ARTIFACTS: ${{ github.workspace }}/.snapshot-diagnostics/actual
     strategy:
       fail-fast: false
       matrix:
@@ -35,18 +37,37 @@ jobs:
           - AgentChatCoreTests
           - AgentChatMarkdownTests
           - AgentChatUIKitTests
+          - AgentChatSnapshotTests
           - AgentChatIntegrationTests
+          - AgentChatTestingTests
           - AgentChatPerformanceTests
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Initialize Simulator service
+        run: xcrun simctl list devices available > /dev/null
       - name: Test ${{ matrix.suite }}
         run: >-
           xcodebuild -scheme AgentChatKit-Package
           -destination "$DESTINATION"
           -only-testing:${{ matrix.suite }}
           -skipPackagePluginValidation test
+      - name: Collect snapshot diagnostics
+        if: failure() && matrix.suite == 'AgentChatSnapshotTests'
+        run: |
+          mkdir -p .snapshot-diagnostics/reference .snapshot-diagnostics/actual
+          cp Tests/AgentChatSnapshotTests/__Snapshots__/AgentChatSnapshotTests/*.png \
+            .snapshot-diagnostics/reference/
+      - name: Upload snapshot diagnostics
+        if: failure() && matrix.suite == 'AgentChatSnapshotTests'
+        uses: actions/upload-artifact@v4
+        with:
+          name: snapshot-diagnostics-${{ github.run_attempt }}
+          if-no-files-found: ignore
+          path: |
+            .snapshot-diagnostics/reference
+            .snapshot-diagnostics/actual
 
   thread-sanitizer:
     runs-on: macos-15
@@ -54,6 +75,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Initialize Simulator service
+        run: xcrun simctl list devices available > /dev/null
       - name: Run Core and integration tests with Thread Sanitizer
         run: >-
           xcodebuild -scheme AgentChatKit-Package
@@ -66,10 +89,13 @@ jobs:
   demo-build:
     runs-on: macos-15
     strategy:
+      fail-fast: false
       matrix:
-        destination:
-          - generic/platform=iOS Simulator
-          - platform=iOS Simulator,name=iPad Pro 13-inch (M4),OS=latest
+        include:
+          - device_family: universal
+            targeted_device_family: 1,2
+          - device_family: iPad
+            targeted_device_family: 2
     steps:
       - uses: actions/checkout@v4
       - name: Select Xcode
@@ -79,22 +105,61 @@ jobs:
           xcodebuild
           -project Examples/AgentChatDemo/AgentChatDemo.xcodeproj
           -scheme AgentChatDemo
-          -destination '${{ matrix.destination }}'
+          -destination 'generic/platform=iOS Simulator'
+          TARGETED_DEVICE_FAMILY='${{ matrix.targeted_device_family }}'
           -skipPackagePluginValidation build
+
+  quickstart-build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Build copyable QuickStart integration
+        run: >-
+          xcodebuild
+          -project Examples/QuickStart/AgentChatQuickStart.xcodeproj
+          -scheme AgentChatQuickStart
+          -destination 'generic/platform=iOS Simulator'
+          -skipPackagePluginValidation build
+
+  demo-ui-tests:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Select Xcode
+        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+      - name: Initialize Simulator service
+        run: xcrun simctl list devices available > /dev/null
+      - name: Run deterministic Demo UI tests
+        run: >-
+          xcodebuild
+          -project Examples/AgentChatDemo/AgentChatDemo.xcodeproj
+          -scheme AgentChatDemo
+          -destination "$DESTINATION"
+          -only-testing:AgentChatDemoUITests
+          -skipPackagePluginValidation test
 
   docs-and-format:
     runs-on: macos-15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Select Xcode
         run: sudo xcode-select -s /Applications/Xcode_16.4.app
       - name: Format lint
         run: >-
           xcrun swift-format lint --recursive --strict
           Sources Tests Examples/AgentChatDemo/App Examples/AgentChatDemo/Scenarios
-          Examples/AgentChatDemo/CustomRenderers
+          Examples/AgentChatDemo/CustomRenderers Examples/AgentChatDemo/UITests
+          Examples/QuickStart/App
       - name: Build DocC
         run: >-
           xcodebuild docbuild -scheme AgentChatKit-Package
           -destination 'generic/platform=iOS Simulator'
           -skipPackagePluginValidation
+      - name: Check public API baseline
+        env:
+          AGENTCHAT_API_BASE_REF: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: Scripts/check-api-baseline.sh

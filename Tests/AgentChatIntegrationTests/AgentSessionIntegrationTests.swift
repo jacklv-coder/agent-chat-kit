@@ -68,11 +68,16 @@ final class AgentSessionIntegrationTests: XCTestCase {
             store: store
         )
         try await session.start()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        try await waitForState {
+            store.snapshot.turns.count == 1
+                && store.snapshot.turns.first?.state == .completed
+        }
 
         XCTAssertEqual(store.snapshot.turns.count, 1)
-        XCTAssertEqual(store.snapshot.turns[0].state, .completed)
-        guard case .markdown(let markdown) = store.snapshot.turns[0].blocks[0].content else {
+        let renderedTurn = try XCTUnwrap(store.snapshot.turns.first)
+        XCTAssertEqual(renderedTurn.state, .completed)
+        let block = try XCTUnwrap(renderedTurn.blocks.first)
+        guard case .markdown(let markdown) = block.content else {
             return XCTFail("Expected Markdown")
         }
         XCTAssertEqual(markdown.markdown, "Hello, world")
@@ -101,6 +106,91 @@ final class AgentSessionIntegrationTests: XCTestCase {
         await connection.close()
     }
 
+    func testMockRuntimeReturnsConfiguredHistoryPage() async throws {
+        let conversationID: AgentConversationID = "history"
+        let date = Date(timeIntervalSince1970: 0)
+        let olderTurn = AgentTurn(
+            id: "older-turn",
+            role: .assistant,
+            blocks: [
+                .init(
+                    id: "older-block",
+                    kind: .markdown,
+                    content: .markdown(.init(markdown: "Older page", isFinal: true)),
+                    state: .succeeded,
+                    createdAt: date
+                )
+            ],
+            state: .completed,
+            createdAt: date,
+            completedAt: date
+        )
+        let playback = AgentScenarioPlaybackController(rate: 0)
+        let runtime = MockAgentRuntime(
+            scenario: .init(
+                events: [],
+                historyPages: [
+                    "cursor": .init(turns: [olderTurn], hasEarlierHistory: false)
+                ]
+            ),
+            playbackController: playback
+        )
+        let store = AgentConversationStore(snapshot: .empty(conversationID: conversationID))
+        let session = AgentChatSession(
+            adapter: runtime,
+            configuration: .init(conversationID: conversationID),
+            store: store
+        )
+        try await session.start()
+
+        try await session.send(
+            .loadEarlier(
+                .init(conversationID: conversationID, cursor: "cursor")
+            )
+        )
+        try await waitForState {
+            store.snapshot.turns.first?.id == olderTurn.id
+        }
+
+        XCTAssertEqual(store.snapshot.turns, [olderTurn])
+        XCTAssertFalse(store.snapshot.hasEarlierHistory)
+        await session.stop()
+    }
+
+    func testMockRuntimeFinishesUnknownHistoryCursorWithEmptyPage() async throws {
+        let conversationID: AgentConversationID = "missing-history"
+        let runtime = MockAgentRuntime(
+            scenario: .init(events: []),
+            playbackController: .init(rate: 0)
+        )
+        let store = AgentConversationStore(
+            snapshot: .init(
+                id: conversationID,
+                earlierHistoryCursor: "missing",
+                hasEarlierHistory: true
+            )
+        )
+        let session = AgentChatSession(
+            adapter: runtime,
+            configuration: .init(conversationID: conversationID),
+            store: store
+        )
+        try await session.start()
+
+        try await session.send(
+            .loadEarlier(
+                .init(conversationID: conversationID, cursor: "missing")
+            )
+        )
+        try await waitForState {
+            !store.snapshot.hasEarlierHistory
+        }
+
+        XCTAssertTrue(store.snapshot.turns.isEmpty)
+        XCTAssertNil(store.snapshot.earlierHistoryCursor)
+        await session.stop()
+    }
+
     func testSubmittedMessageProducesThinkingToolsAndStreamingMarkdown() async throws {
         let conversationID: AgentConversationID = "interactive"
         let runtime = MockAgentRuntime(scenario: .init(events: []))
@@ -115,14 +205,10 @@ final class AgentSessionIntegrationTests: XCTestCase {
         try await session.send(
             .submit(.init(conversationID: conversationID, text: "Show every state"))
         )
-        for _ in 0..<60 {
-            if store.snapshot.turns.count == 2,
-                store.snapshot.turns.last?.role == .assistant,
-                store.snapshot.turns.last?.state == .completed
-            {
-                break
-            }
-            try await Task.sleep(nanoseconds: 100_000_000)
+        try await waitForState {
+            store.snapshot.turns.count == 2
+                && store.snapshot.turns.last?.role == .assistant
+                && store.snapshot.turns.last?.state == .completed
         }
 
         XCTAssertEqual(store.snapshot.turns.map(\.role), [.user, .assistant])
@@ -137,6 +223,58 @@ final class AgentSessionIntegrationTests: XCTestCase {
         }
         XCTAssertTrue(markdown.isFinal)
         XCTAssertTrue(markdown.markdown.contains("| 阶段 | 展示结果 |"))
+        await session.stop()
+    }
+
+    func testMockRuntimeIgnoresRetryForSucceededBlock() async throws {
+        let conversationID: AgentConversationID = "retry-ineligible"
+        let date = Date(timeIntervalSince1970: 0)
+        let block = AgentBlock(
+            id: "already-succeeded",
+            kind: .tool,
+            content: .tool(.init(toolName: "repository.inspect", title: "Inspect repository")),
+            state: .succeeded,
+            createdAt: date
+        )
+        let turn = AgentTurn(
+            id: "turn",
+            role: .assistant,
+            blocks: [block],
+            state: .completed,
+            createdAt: date
+        )
+        let runtime = MockAgentRuntime(
+            scenario: .init(
+                events: [
+                    .init(
+                        event: .init(
+                            id: "snapshot",
+                            sequence: 1,
+                            conversationID: conversationID,
+                            timestamp: date,
+                            payload: .snapshot(
+                                .init(id: conversationID, turns: [turn])
+                            )
+                        ),
+                        delayNanoseconds: 0
+                    )
+                ]
+            )
+        )
+        let store = AgentConversationStore(snapshot: .empty(conversationID: conversationID))
+        let session = AgentChatSession(
+            adapter: runtime,
+            configuration: .init(conversationID: conversationID),
+            store: store
+        )
+        try await session.start()
+        try await waitForState { store.snapshot.turns.first?.blocks.first?.id == block.id }
+
+        try await session.send(
+            .retry(.init(conversationID: conversationID, blockID: block.id))
+        )
+
+        XCTAssertEqual(store.snapshot.turns.first?.blocks.first, block)
         await session.stop()
     }
 
@@ -162,7 +300,10 @@ final class AgentSessionIntegrationTests: XCTestCase {
             store: store
         )
         try await session.start()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        try await waitForState {
+            if case .offline = store.snapshot.state { return true }
+            return false
+        }
         XCTAssertEqual(store.snapshot.turns.map(\.id), ["retained-turn"])
         guard case .offline = store.snapshot.state else {
             return XCTFail("Expected retained offline state")
@@ -181,12 +322,26 @@ final class AgentSessionIntegrationTests: XCTestCase {
         )
 
         try await session.start()
-        try await Task.sleep(nanoseconds: 100_000_000)
+        try await waitForState {
+            if case .offline = store.snapshot.state { return true }
+            return false
+        }
 
         guard case .offline = store.snapshot.state else {
             return XCTFail("Expected a normally completed connection to become offline")
         }
         await session.stop()
+    }
+
+    private func waitForState(
+        maxAttempts: Int = 150,
+        condition: () -> Bool
+    ) async throws {
+        for _ in 0..<maxAttempts {
+            if condition() { return }
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        XCTFail("Timed out waiting for the expected session state")
     }
 }
 

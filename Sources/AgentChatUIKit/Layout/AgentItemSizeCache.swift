@@ -7,19 +7,22 @@ struct AgentItemSizeCacheKey: Hashable {
     let widthBucket: Int
     let contentSizeCategory: UIContentSizeCategory
     let themeVersion: Int
+    let layoutVariant: Int
 
     init(
         blockID: AgentBlockID,
         revision: Int64,
         width: CGFloat,
         contentSizeCategory: UIContentSizeCategory,
-        themeVersion: Int
+        themeVersion: Int,
+        layoutVariant: Int = 0
     ) {
         self.blockID = blockID
         self.revision = revision
         self.widthBucket = Int((width / 8).rounded())
         self.contentSizeCategory = contentSizeCategory
         self.themeVersion = themeVersion
+        self.layoutVariant = layoutVariant
     }
 }
 

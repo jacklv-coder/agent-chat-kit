@@ -9,6 +9,9 @@ final class AgentScrollCoordinator {
     private let indexPath: (AgentBlockID) -> IndexPath?
     private let orderedBlockIDs: () -> [AgentBlockID]
     private var fallbackCandidates: [AgentBlockID] = []
+    private var isStreaming = false
+    private var isUserInteracting = false
+    private var userInteractionCooldownUntil: Date?
 
     private(set) var mode: AgentScrollMode = .followingLatest
     private(set) var unreadCount = 0
@@ -33,13 +36,34 @@ final class AgentScrollCoordinator {
         return false
     }
 
-    func userWillBeginDragging() { mode = .userInteracting }
+    var shouldAutomaticallyFollowLatest: Bool {
+        canAutomaticallyFollowLatest(at: Date())
+    }
+
+    func canAutomaticallyFollowLatest(at date: Date) -> Bool {
+        isFollowingLatest
+            && !AgentScrollPolicy.isAutomaticFollowPaused(
+                isUserInteracting: isUserInteracting,
+                cooldownUntil: userInteractionCooldownUntil,
+                now: date
+            )
+    }
+
+    func setStreaming(_ isStreaming: Bool) {
+        self.isStreaming = isStreaming
+    }
+
+    func userWillBeginDragging() {
+        isUserInteracting = true
+        userInteractionCooldownUntil = nil
+        mode = .userInteracting
+    }
 
     func userDidScroll() {
         guard let collectionView, collectionView.isDragging || collectionView.isDecelerating else {
             return
         }
-        if distanceToBottom(in: collectionView) <= followingThreshold {
+        if isNearBottom(in: collectionView) {
             mode = .followingLatest
             clearUnread()
         } else if collectionView.isDragging {
@@ -47,9 +71,11 @@ final class AgentScrollCoordinator {
         }
     }
 
-    func userDidEndInteraction() {
+    func userDidEndInteraction(now: Date = Date()) {
         guard let collectionView else { return }
-        if distanceToBottom(in: collectionView) <= followingThreshold {
+        isUserInteracting = false
+        userInteractionCooldownUntil = AgentScrollPolicy.cooldownDeadline(after: now)
+        if isNearBottom(in: collectionView) {
             mode = .followingLatest
             clearUnread()
         } else {
@@ -132,43 +158,32 @@ final class AgentScrollCoordinator {
         mode = .readingHistory(anchor: captureAnchor(edge: anchor.edge))
     }
 
-    func preserveReadingAnchor(for updates: () -> Void) {
-        guard !isFollowingLatest, let anchor = captureAnchor(edge: .top) else {
-            updates()
-            return
-        }
-        updates()
-        restore(anchor)
-    }
-
     func receivedNewContent(count: Int = 1) {
         guard !isFollowingLatest else { return }
         unreadCount += max(0, count)
         didChangeUnreadCount?(unreadCount)
     }
 
-    func scrollToLatest(animated: Bool) {
+    func scrollToLatest() {
         guard let collectionView else { return }
-        mode = .programmaticNavigation(target: orderedBlockIDs().last ?? "")
-        collectionView.layoutIfNeeded()
-        let target = max(
-            -collectionView.adjustedContentInset.top,
-            collectionView.contentSize.height - collectionView.bounds.height
-                + collectionView.adjustedContentInset.bottom
-        )
-        collectionView.setContentOffset(
-            CGPoint(x: collectionView.contentOffset.x, y: target),
-            animated: animated
-        )
-        if !animated {
-            mode = .followingLatest
-            clearUnread()
-        }
-    }
-
-    func programmaticScrollDidEnd() {
+        isUserInteracting = false
+        userInteractionCooldownUntil = nil
         mode = .followingLatest
         clearUnread()
+        collectionView.layoutIfNeeded()
+        let target = latestOffset(in: collectionView)
+        collectionView.setContentOffset(
+            CGPoint(x: collectionView.contentOffset.x, y: target),
+            animated: false
+        )
+    }
+
+    private func isNearBottom(in collectionView: UICollectionView) -> Bool {
+        AgentScrollPolicy.isNearBottom(
+            distanceFromBottom: distanceToBottom(in: collectionView),
+            followingThreshold: followingThreshold,
+            isStreaming: isStreaming
+        )
     }
 
     private func rememberFallbacks(around blockID: AgentBlockID) {
@@ -201,6 +216,14 @@ final class AgentScrollCoordinator {
                 + collectionView.adjustedContentInset.bottom
         )
         return min(maximum, max(minimum, y))
+    }
+
+    private func latestOffset(in collectionView: UICollectionView) -> CGFloat {
+        max(
+            -collectionView.adjustedContentInset.top,
+            collectionView.contentSize.height - collectionView.bounds.height
+                + collectionView.adjustedContentInset.bottom
+        )
     }
 
     private func clearUnread() {

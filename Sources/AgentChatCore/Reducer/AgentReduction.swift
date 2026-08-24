@@ -39,6 +39,8 @@ public enum AgentPresentationPatch: Hashable, Codable, Sendable {
     case deleteBlock(turnID: AgentTurnID, blockID: AgentBlockID)
     /// Prepends earlier turn sections while preserving a stable-ID scroll anchor.
     case prependTurns([AgentTurnID])
+    /// Updates earlier-history cursor and availability state.
+    case historyStateChanged
     /// Updates connection-level UI.
     case conversationStateChanged
     /// Publishes a recoverable, user-safe notice.

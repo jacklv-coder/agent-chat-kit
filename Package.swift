@@ -20,6 +20,10 @@ let package = Package(
             url: "https://github.com/swiftlang/swift-markdown.git",
             exact: "0.8.0"
         ),
+        .package(
+            url: "https://github.com/pointfreeco/swift-snapshot-testing.git",
+            exact: "1.19.4"
+        ),
     ],
     targets: [
         .target(name: "AgentChatCore"),
@@ -59,12 +63,23 @@ let package = Package(
             dependencies: ["AgentChatUIKit"]
         ),
         .testTarget(
+            name: "AgentChatSnapshotTests",
+            dependencies: [
+                "AgentChatUIKit",
+                .product(name: "SnapshotTesting", package: "swift-snapshot-testing"),
+            ]
+        ),
+        .testTarget(
             name: "AgentChatIntegrationTests",
             dependencies: ["AgentChatCore", "AgentChatTesting"]
         ),
         .testTarget(
+            name: "AgentChatTestingTests",
+            dependencies: ["AgentChatCore", "AgentChatTesting"]
+        ),
+        .testTarget(
             name: "AgentChatPerformanceTests",
-            dependencies: ["AgentChatCore", "AgentChatMarkdown"]
+            dependencies: ["AgentChatCore", "AgentChatMarkdown", "AgentChatUIKit"]
         ),
     ],
     swiftLanguageModes: [.v6]

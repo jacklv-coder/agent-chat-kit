@@ -14,12 +14,14 @@ public final class AgentConversationViewController: UIViewController {
     private var theme: AgentChatTheme
     private let rendererRegistry: AgentBlockRendererRegistry
     private let collectionView: UICollectionView
-    private let composer: AgentComposerView
+    private var composer: any AgentComposerProviding
+    private var composerView: UIView
+    private var lastComposerState = AgentComposerState()
+    private var isComposerSubmissionPending = false
     private let connectionBanner = UILabel()
     private let jumpToLatestButton = UIButton(type: .system)
-    private let sizeCache = AgentItemSizeCache()
-
-    private var dataSource: UICollectionViewDiffableDataSource<AgentTurnID, AgentBlockID>!
+    private let historyLoadingIndicator = UIActivityIndicatorView(style: .medium)
+    private var displayedTurns: [AgentTurn] = []
     private var updateScheduler: AgentUpdateScheduler!
     private var scrollCoordinator: AgentScrollCoordinator!
     private var patchTask: Task<Void, Never>?
@@ -28,8 +30,15 @@ public final class AgentConversationViewController: UIViewController {
     private var initializedExpansionBlockIDs: Set<AgentBlockID> = []
     private var resolvingApprovalIDs: Set<AgentApprovalID> = []
     private var isLoadingHistory = false
-    private var previousViewSize: CGSize = .zero
-    private var pendingGeometryAnchor: AgentLayoutAnchor?
+    private var isHistoryRequestArmed = false
+    private var isPerformingCollectionUpdate = false
+    private var pendingCollectionUpdate: AgentScheduledUpdate?
+    private var pendingCellReconfigurationBlockIDs: Set<AgentBlockID> = []
+    private var pendingHeightChangeBlockIDs: Set<AgentBlockID> = []
+    private var needsInitialScrollToLatest = true
+    private var pendingViewportResizeAnchor: AgentLayoutAnchor?
+    private var pendingViewportResizeRestorationAnchor: AgentLayoutAnchor?
+    private var pendingViewportResizeWasFollowingLatest = false
     private var bannerHeightConstraint: NSLayoutConstraint?
 
     /// Creates a scene-scoped conversation controller.
@@ -49,7 +58,7 @@ public final class AgentConversationViewController: UIViewController {
             blockSpacing: theme.metrics.blockSpacing,
             sectionTopInset: 4,
             sectionBottomInset: 8,
-            estimatedItemHeight: 80
+            estimatedItemHeight: 44
         )
         self.collectionView = UICollectionView(
             frame: .zero,
@@ -57,8 +66,43 @@ public final class AgentConversationViewController: UIViewController {
                 configuration: layoutConfiguration
             )
         )
-        self.composer = AgentComposerView(maximumHeight: configuration.maximumComposerHeight)
+        let composer = AgentComposerView(maximumHeight: configuration.maximumComposerHeight)
+        self.composer = composer
+        self.composerView = composer.view
         super.init(nibName: nil, bundle: nil)
+        configureComposerImportRouting()
+    }
+
+    /// Creates a scene-scoped conversation controller with a host-provided composer.
+    public convenience init(
+        store: AgentConversationStore,
+        configuration: AgentConversationConfiguration = .init(),
+        theme: AgentChatTheme = .system,
+        rendererRegistry: AgentBlockRendererRegistry = .default,
+        composer: (any AgentComposerProviding)?
+    ) {
+        self.init(
+            store: store,
+            configuration: configuration,
+            theme: theme,
+            rendererRegistry: rendererRegistry
+        )
+        guard let composer else { return }
+        self.composer = composer
+        self.composerView = composer.view
+        configureComposerImportRouting()
+    }
+
+    private func configureComposerImportRouting() {
+        guard let importRouting = composer as? any AgentComposerImportRouting else { return }
+        importRouting.importHandler = { [weak self] providers, sourceView in
+            guard let self else { return }
+            self.delegate?.conversationViewController(
+                self,
+                didPaste: providers,
+                sourceView: sourceView
+            )
+        }
     }
 
     @available(*, unavailable)
@@ -86,35 +130,109 @@ public final class AgentConversationViewController: UIViewController {
             name: UIApplication.willEnterForegroundNotification,
             object: nil
         )
-        reconcileStructuralSnapshot(animated: false, anchor: nil, followLatest: true)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(contentSizeCategoryDidChange),
+            name: UIContentSizeCategory.didChangeNotification,
+            object: nil
+        )
+        displayedTurns = presentationTurns
+        collectionView.reloadData()
         observeStore()
         observeComposer()
         updateConnectionBanner()
         updateComposerState()
     }
 
-    public override func viewWillLayoutSubviews() {
-        super.viewWillLayoutSubviews()
-        if previousViewSize != .zero, previousViewSize != view.bounds.size,
-            !scrollCoordinator.isFollowingLatest
-        {
-            pendingGeometryAnchor = scrollCoordinator.captureAnchor(edge: .top)
-            sizeCache.invalidateAppearance()
-        }
-    }
-
     public override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
-        if let anchor = pendingGeometryAnchor {
-            pendingGeometryAnchor = nil
-            scrollCoordinator.restore(anchor)
-        }
-        previousViewSize = view.bounds.size
+        guard needsInitialScrollToLatest else { return }
+        needsInitialScrollToLatest = false
+        scrollCoordinator.scrollToLatest()
+    }
+
+    public override func viewWillTransition(
+        to size: CGSize,
+        with coordinator: any UIViewControllerTransitionCoordinator
+    ) {
+        let anchor = beginViewportResize()
+        super.viewWillTransition(to: size, with: coordinator)
+        coordinator.animate(
+            alongsideTransition: { [weak self] _ in
+                self?.collectionView.collectionViewLayout.invalidateLayout()
+            },
+            completion: { [weak self] _ in
+                self?.endViewportResize(restoring: anchor)
+            }
+        )
     }
 
     public override func didReceiveMemoryWarning() {
         super.didReceiveMemoryWarning()
-        sizeCache.removeAll()
+        rendererRegistry.removeCachedData()
+    }
+
+    func beginViewportResize() -> AgentLayoutAnchor? {
+        let wasFollowingLatest = scrollCoordinator.isFollowingLatest
+        let anchor = scrollCoordinator.captureAnchor(edge: wasFollowingLatest ? .bottom : .top)
+        pendingViewportResizeAnchor = anchor
+        pendingViewportResizeRestorationAnchor = nil
+        pendingViewportResizeWasFollowingLatest = wasFollowingLatest
+        collectionView.collectionViewLayout.invalidateLayout()
+        return anchor
+    }
+
+    func endViewportResize(restoring anchor: AgentLayoutAnchor?) {
+        guard let anchor, pendingViewportResizeAnchor == anchor else { return }
+        guard !isPerformingCollectionUpdate else {
+            pendingViewportResizeRestorationAnchor = anchor
+            return
+        }
+        performViewportResizeRestoration(anchor)
+    }
+
+    private func performViewportResizeRestoration(_ anchor: AgentLayoutAnchor) {
+        guard pendingViewportResizeAnchor == anchor else { return }
+        // Rich Markdown children capture the available content width when they are built.
+        // Recreate only visible items after the new bounds have landed; off-screen items
+        // are configured with the new width when they are next dequeued.
+        let visibleItems = collectionView.indexPathsForVisibleItems
+        isPerformingCollectionUpdate = true
+        UIView.performWithoutAnimation {
+            collectionView.performBatchUpdates {
+                if !visibleItems.isEmpty {
+                    collectionView.reconfigureItems(at: visibleItems)
+                }
+            } completion: { [weak self] _ in
+                guard let self else { return }
+                guard self.pendingViewportResizeAnchor == anchor else {
+                    self.completeCollectionUpdate()
+                    return
+                }
+                self.collectionView.layoutIfNeeded()
+                self.restoreViewportAfterResize(anchor)
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    guard self.pendingViewportResizeAnchor == anchor else {
+                        self.completeCollectionUpdate()
+                        return
+                    }
+                    self.collectionView.layoutIfNeeded()
+                    self.restoreViewportAfterResize(anchor)
+                    self.pendingViewportResizeAnchor = nil
+                    self.pendingViewportResizeWasFollowingLatest = false
+                    self.completeCollectionUpdate()
+                }
+            }
+        }
+    }
+
+    private func restoreViewportAfterResize(_ anchor: AgentLayoutAnchor) {
+        if pendingViewportResizeWasFollowingLatest {
+            scrollCoordinator.scrollToLatest()
+        } else {
+            scrollCoordinator.restore(anchor)
+        }
     }
 
     /// Replaces the current visual theme and invalidates appearance-sensitive caches.
@@ -122,16 +240,48 @@ public final class AgentConversationViewController: UIViewController {
         self.theme = theme
         view.backgroundColor = theme.colors.background
         collectionView.backgroundColor = theme.colors.background
-        sizeCache.invalidateAppearance()
-        collectionView.collectionViewLayout.invalidateLayout()
-        reconcileVisibleItems()
+        let layoutConfiguration = AgentTimelineLayoutConfiguration(
+            compactSideInset: theme.metrics.pageInset,
+            maximumContentWidth: theme.metrics.maximumContentWidth,
+            blockSpacing: theme.metrics.blockSpacing,
+            sectionTopInset: 4,
+            sectionBottomInset: 8,
+            estimatedItemHeight: 44
+        )
+        collectionView.setCollectionViewLayout(
+            AgentConversationLayoutFactory.makeLayout(configuration: layoutConfiguration),
+            animated: false
+        )
+        collectionView.reloadData()
     }
 
     /// Replaces attachment metadata displayed by the default composer.
     public func setComposerAttachments(_ attachments: [AgentAttachment]) {
         var state = currentComposerState()
         state.attachments = attachments
-        composer.apply(state)
+        state.attachmentStatuses = state.attachmentStatuses.filter { id, _ in
+            attachments.contains { $0.id == id }
+        }
+        applyComposerState(state)
+    }
+
+    /// Replaces upload or validation state for one pending attachment.
+    public func setComposerAttachmentStatus(
+        _ status: AgentComposerAttachmentStatus,
+        for attachmentID: AgentAttachmentID
+    ) {
+        var state = currentComposerState()
+        guard state.attachments.contains(where: { $0.id == attachmentID }) else { return }
+        state.attachmentStatuses[attachmentID] = status
+        applyComposerState(state)
+    }
+
+    /// Replaces host-defined default composer controls.
+    public func setComposerAccessories(_ accessories: [AgentComposerAccessory]) {
+        configuration.composerAccessories = accessories
+        var state = currentComposerState()
+        state.accessories = accessories
+        applyComposerState(state)
     }
 
     public override var keyCommands: [UIKeyCommand]? {
@@ -187,8 +337,10 @@ public final class AgentConversationViewController: UIViewController {
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.alwaysBounceVertical = true
         collectionView.keyboardDismissMode = .interactive
+        collectionView.selfSizingInvalidation = .disabled
         collectionView.delegate = self
         collectionView.contentInsetAdjustmentBehavior = .always
+        collectionView.accessibilityIdentifier = "AgentConversationTimeline"
 
         connectionBanner.translatesAutoresizingMaskIntoConstraints = false
         connectionBanner.font = .preferredFont(forTextStyle: .subheadline)
@@ -198,10 +350,11 @@ public final class AgentConversationViewController: UIViewController {
         connectionBanner.backgroundColor = .systemYellow.withAlphaComponent(0.22)
         connectionBanner.textColor = .label
         connectionBanner.isHidden = true
+        connectionBanner.accessibilityIdentifier = "AgentConversationConnectionBanner"
         bannerHeightConstraint = connectionBanner.heightAnchor.constraint(equalToConstant: 0)
         bannerHeightConstraint?.isActive = true
 
-        composer.translatesAutoresizingMaskIntoConstraints = false
+        composerView.translatesAutoresizingMaskIntoConstraints = false
 
         var jumpConfiguration = UIButton.Configuration.filled()
         jumpConfiguration.title = AgentStrings.jumpToLatest
@@ -209,24 +362,27 @@ public final class AgentConversationViewController: UIViewController {
         jumpConfiguration.imagePadding = 5
         jumpConfiguration.cornerStyle = .capsule
         jumpToLatestButton.configuration = jumpConfiguration
+        jumpToLatestButton.isPointerInteractionEnabled = true
         jumpToLatestButton.translatesAutoresizingMaskIntoConstraints = false
         jumpToLatestButton.isHidden = true
+        jumpToLatestButton.accessibilityIdentifier = "AgentConversationJumpToLatestButton"
         jumpToLatestButton.addAction(
             UIAction { [weak self] _ in
-                guard let self else { return }
-                self.scrollCoordinator.scrollToLatest(
-                    animated: !UIAccessibility.isReduceMotionEnabled
-                )
+                self?.scrollCoordinator.scrollToLatest()
             },
             for: .touchUpInside
         )
 
+        historyLoadingIndicator.translatesAutoresizingMaskIntoConstraints = false
+        historyLoadingIndicator.hidesWhenStopped = true
+        historyLoadingIndicator.accessibilityIdentifier = "AgentHistoryLoadingIndicator"
+
         view.addSubview(connectionBanner)
         view.addSubview(collectionView)
-        view.addSubview(composer)
+        view.addSubview(composerView)
+        view.addSubview(historyLoadingIndicator)
         view.addSubview(jumpToLatestButton)
         view.keyboardLayoutGuide.followsUndockedKeyboard = true
-
         NSLayoutConstraint.activate([
             connectionBanner.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             connectionBanner.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -234,16 +390,16 @@ public final class AgentConversationViewController: UIViewController {
             collectionView.topAnchor.constraint(equalTo: connectionBanner.bottomAnchor),
             collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -8),
-            composer.leadingAnchor.constraint(
+            collectionView.bottomAnchor.constraint(equalTo: composerView.topAnchor, constant: -8),
+            composerView.leadingAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.leadingAnchor,
                 constant: 12
             ),
-            composer.trailingAnchor.constraint(
+            composerView.trailingAnchor.constraint(
                 equalTo: view.safeAreaLayoutGuide.trailingAnchor,
                 constant: -12
             ),
-            composer.bottomAnchor.constraint(
+            composerView.bottomAnchor.constraint(
                 equalTo: view.keyboardLayoutGuide.topAnchor,
                 constant: -8
             ),
@@ -251,7 +407,15 @@ public final class AgentConversationViewController: UIViewController {
                 equalTo: view.safeAreaLayoutGuide.trailingAnchor,
                 constant: -16
             ),
-            jumpToLatestButton.bottomAnchor.constraint(equalTo: composer.topAnchor, constant: -10),
+            jumpToLatestButton.bottomAnchor.constraint(
+                equalTo: composerView.topAnchor,
+                constant: -10
+            ),
+            historyLoadingIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            historyLoadingIndicator.topAnchor.constraint(
+                equalTo: collectionView.topAnchor,
+                constant: 10
+            ),
         ])
     }
 
@@ -263,72 +427,26 @@ public final class AgentConversationViewController: UIViewController {
             withReuseIdentifier: AgentTurnHeaderView.reuseIdentifier
         )
 
-        dataSource = UICollectionViewDiffableDataSource<AgentTurnID, AgentBlockID>(
-            collectionView: collectionView
-        ) { [weak self] collectionView, indexPath, blockID in
-            guard let self,
-                let (turn, block) = self.turnAndBlock(for: blockID)
-            else { return nil }
-            let context = AgentBlockRenderContext(
-                conversationID: self.store.snapshot.id,
-                turn: turn,
-                block: block,
-                availableWidth: self.availableContentWidth,
-                theme: self.theme,
-                environment: AgentRenderEnvironment(
-                    contentSizeCategory: self.traitCollection.preferredContentSizeCategory.rawValue,
-                    reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled,
-                    resolvingApprovalIDs: self.resolvingApprovalIDs,
-                    expandedBlockIDs: self.expandedBlockIDs
-                ),
-                imageProvider: self.configuration.imageProvider,
-                actionSink: AgentBlockActionSink { [weak self] action in
-                    self?.route(action)
-                }
-            )
-            return self.rendererRegistry.renderer(for: block).dequeueConfiguredCell(
-                from: collectionView,
-                at: indexPath,
-                context: context
-            )
-        }
-
-        dataSource.supplementaryViewProvider = { [weak self] collectionView, kind, indexPath in
-            guard kind == UICollectionView.elementKindSectionHeader,
-                let self,
-                let header = collectionView.dequeueReusableSupplementaryView(
-                    ofKind: kind,
-                    withReuseIdentifier: AgentTurnHeaderView.reuseIdentifier,
-                    for: indexPath
-                ) as? AgentTurnHeaderView,
-                indexPath.section < self.dataSource.snapshot().sectionIdentifiers.count,
-                let turn = self.store.snapshot.turns.first(where: {
-                    $0.id == self.dataSource.snapshot().sectionIdentifiers[indexPath.section]
-                })
-            else { return nil }
-            header.configure(turn: turn)
-            return header
-        }
+        collectionView.dataSource = self
     }
 
     private func configureCoordinators() {
         scrollCoordinator = AgentScrollCoordinator(
             collectionView: collectionView,
             followingThreshold: configuration.followingThreshold,
-            itemIdentifier: { [weak self] in self?.dataSource.itemIdentifier(for: $0) },
-            indexPath: { [weak self] in self?.dataSource.indexPath(for: $0) },
+            itemIdentifier: { [weak self] in self?.blockID(at: $0) },
+            indexPath: { [weak self] in self?.indexPath(for: $0) },
             orderedBlockIDs: { [weak self] in
-                self?.presentationTurns.flatMap { $0.blocks.map(\.id) } ?? []
+                self?.displayedTurns.flatMap { $0.blocks.map(\.id) } ?? []
             }
         )
         scrollCoordinator.didChangeUnreadCount = { [weak self] count in
             self?.updateJumpButton(unreadCount: count)
         }
 
-        updateScheduler = AgentUpdateScheduler(
-            classify: { [weak self] patch in self?.classify(patch) ?? .structural },
-            flush: { [weak self] update in self?.apply(update) }
-        )
+        updateScheduler = AgentUpdateScheduler { [weak self] update in
+            self?.apply(update)
+        }
     }
 
     private func observeStore() {
@@ -342,36 +460,34 @@ public final class AgentConversationViewController: UIViewController {
     }
 
     private func observeComposer() {
+        guard composerTask == nil else { return }
+        let actionStream = composer.actionStream
         composerTask = Task { [weak self] in
-            guard let self else { return }
-            for await action in self.composer.actionStream {
-                guard !Task.isCancelled else { return }
+            for await action in actionStream {
+                guard !Task.isCancelled, let self else { return }
                 self.handleComposer(action)
             }
         }
     }
 
-    private func classify(_ patch: AgentPresentationPatch) -> AgentCollectionUpdateKind {
-        switch patch {
-        case .replaceAll, .insertTurn, .deleteTurn, .insertBlock, .deleteBlock, .prependTurns:
-            return .structural
-        case .reconfigureBlock(let blockID):
-            guard let block = turnAndBlock(for: blockID)?.block else { return .structural }
-            switch block.content {
-            case .activity: return .contentOnly
-            default: return .sizeAffecting
-            }
-        case .reconfigureTurn, .conversationStateChanged, .notice:
-            return .contentOnly
-        }
-    }
-
     private func apply(_ update: AgentScheduledUpdate) {
+        guard !isPerformingCollectionUpdate else {
+            mergePendingCollectionUpdate(update)
+            return
+        }
+
         updateConnectionBanner()
         updateComposerState()
         cleanupResolvedApprovalState()
+        if update.patches.contains(where: { patch in
+            if case .historyStateChanged = patch { return true }
+            return false
+        }) {
+            setHistoryLoading(false)
+        }
 
         if update.requiresStructuralReconciliation {
+            let updatedTurns = presentationTurns
             let isPrepend = update.patches.contains { patch in
                 if case .prependTurns = patch { return true }
                 return false
@@ -379,75 +495,189 @@ public final class AgentConversationViewController: UIViewController {
             let anchor =
                 isPrepend
                 ? scrollCoordinator.beginHistoryPrepend()
-                : (scrollCoordinator.isFollowingLatest
-                    ? nil : scrollCoordinator.captureAnchor(edge: .top))
-            let shouldFollow = scrollCoordinator.isFollowingLatest
+                : nil
+            let shouldFollow = scrollCoordinator.shouldAutomaticallyFollowLatest
             let insertedCount = update.patches.reduce(into: 0) { count, patch in
                 switch patch {
                 case .insertBlock, .insertTurn: count += 1
                 default: break
                 }
             }
-            reconcileStructuralSnapshot(
-                animated: !UIAccessibility.isReduceMotionEnabled,
+            applyStructuralChanges(
+                to: updatedTurns,
                 anchor: anchor,
-                followLatest: shouldFollow
+                followLatest: shouldFollow,
+                forceReload: update.patches.contains { patch in
+                    if case .replaceAll = patch { return true }
+                    return false
+                }
             )
             if !shouldFollow, insertedCount > 0 {
                 scrollCoordinator.receivedNewContent(count: insertedCount)
             }
-            if isPrepend { isLoadingHistory = false }
             return
         }
 
-        var snapshot = dataSource.snapshot()
-        let existing = Set(snapshot.itemIdentifiers)
-        let sizeIDs = update.sizeAffectingBlockIDs.filter(existing.contains)
-        let contentIDs = update.contentOnlyBlockIDs.filter(existing.contains)
-        for id in sizeIDs { sizeCache.invalidate(blockID: id) }
-        if !sizeIDs.isEmpty || !contentIDs.isEmpty {
-            snapshot.reconfigureItems(Array(sizeIDs.union(contentIDs)))
-        }
+        displayedTurns = presentationTurns
+        let existing = Set(displayedTurns.flatMap { $0.blocks.map(\.id) })
+        let updatedIndexPaths = update.reconfiguredBlockIDs
+            .filter(existing.contains)
+            .compactMap(indexPath(for:))
         let turnIDs = update.patches.compactMap { patch -> AgentTurnID? in
             if case .reconfigureTurn(let turnID) = patch { return turnID }
             return nil
-        }.filter { snapshot.sectionIdentifiers.contains($0) }
-        if !turnIDs.isEmpty { snapshot.reloadSections(turnIDs) }
+        }
+        reconfigureVisibleTurnHeaders(ids: Set(turnIDs))
 
-        let anchor =
-            sizeIDs.isEmpty || scrollCoordinator.isFollowingLatest
-            ? nil : scrollCoordinator.captureAnchor(edge: .top)
-        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-            guard let self else { return }
-            if !sizeIDs.isEmpty { self.collectionView.collectionViewLayout.invalidateLayout() }
-            self.collectionView.layoutIfNeeded()
-            if let anchor {
-                self.scrollCoordinator.restore(anchor)
-            } else if self.scrollCoordinator.isFollowingLatest {
-                self.scrollCoordinator.scrollToLatest(animated: false)
+        guard !updatedIndexPaths.isEmpty else { return }
+
+        isPerformingCollectionUpdate = true
+        let shouldFollow = scrollCoordinator.shouldAutomaticallyFollowLatest
+        UIView.performWithoutAnimation {
+            collectionView.reconfigureItems(at: updatedIndexPaths)
+            collectionView.performBatchUpdates(nil) { [weak self] _ in
+                self?.finishCollectionUpdate(shouldFollow ? .followLatest : .none)
             }
         }
     }
 
-    private func reconcileStructuralSnapshot(
-        animated: Bool,
+    private func applyStructuralChanges(
+        to updatedTurns: [AgentTurn],
+        anchor: AgentLayoutAnchor?,
+        followLatest: Bool,
+        forceReload: Bool
+    ) {
+        isPerformingCollectionUpdate = true
+        synchronizeDefaultExpansionState()
+        let previousTurns = displayedTurns
+        guard !forceReload,
+            let changes = AgentTimelineBatchChanges(from: previousTurns, to: updatedTurns)
+        else {
+            displayedTurns = updatedTurns
+            UIView.performWithoutAnimation {
+                collectionView.reloadData()
+                collectionView.layoutIfNeeded()
+            }
+            finishCollectionUpdate(completionIntent(anchor: anchor, followLatest: followLatest))
+            return
+        }
+
+        guard changes.hasChanges else {
+            displayedTurns = updatedTurns
+            reconfigureVisibleItems()
+            finishCollectionUpdate(completionIntent(anchor: anchor, followLatest: followLatest))
+            return
+        }
+
+        displayedTurns = updatedTurns
+        UIView.performWithoutAnimation {
+            collectionView.performBatchUpdates {
+                collectionView.deleteItems(at: changes.deletedItems)
+                collectionView.deleteSections(changes.deletedSections)
+                collectionView.insertSections(changes.insertedSections)
+                collectionView.insertItems(at: changes.insertedItems)
+            } completion: { [weak self] _ in
+                guard let self else { return }
+                self.reconfigureVisibleItems()
+                self.finishCollectionUpdate(
+                    self.completionIntent(anchor: anchor, followLatest: followLatest)
+                )
+            }
+        }
+    }
+
+    private func mergePendingCollectionUpdate(_ update: AgentScheduledUpdate) {
+        var pending = pendingCollectionUpdate ?? AgentScheduledUpdate()
+        pending.requiresStructuralReconciliation =
+            pending.requiresStructuralReconciliation || update.requiresStructuralReconciliation
+        pending.reconfiguredBlockIDs.formUnion(update.reconfiguredBlockIDs)
+        pending.patches.append(contentsOf: update.patches)
+        pendingCollectionUpdate = pending
+    }
+
+    private func completionIntent(
         anchor: AgentLayoutAnchor?,
         followLatest: Bool
-    ) {
-        synchronizeDefaultExpansionState()
-        var snapshot = NSDiffableDataSourceSnapshot<AgentTurnID, AgentBlockID>()
-        for turn in presentationTurns {
-            snapshot.appendSections([turn.id])
-            snapshot.appendItems(turn.blocks.map(\.id), toSection: turn.id)
+    ) -> AgentCollectionCompletionIntent {
+        if let anchor {
+            return .restoreHistory(anchor)
         }
-        dataSource.apply(snapshot, animatingDifferences: animated) { [weak self] in
-            guard let self else { return }
-            self.collectionView.layoutIfNeeded()
-            if let anchor {
+        return followLatest ? .followLatest : .none
+    }
+
+    private func finishCollectionUpdate(_ intent: AgentCollectionCompletionIntent) {
+        switch intent {
+        case .none:
+            collectionView.layoutIfNeeded()
+            completeCollectionUpdate()
+
+        case .restoreHistory(let anchor):
+            collectionView.layoutIfNeeded()
+            scrollCoordinator.restore(anchor)
+            // On older UIKit versions, self-sizing cells inserted above the viewport can
+            // resolve their final heights one layout turn after the batch completion.
+            // Restore the same stable-ID anchor once more after that pass so the visible
+            // message does not move when estimated heights are replaced.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.collectionView.layoutIfNeeded()
                 self.scrollCoordinator.restore(anchor)
-            } else if followLatest {
-                self.scrollCoordinator.scrollToLatest(animated: false)
+                self.completeCollectionUpdate()
             }
+
+        case .followLatest:
+            collectionView.layoutIfNeeded()
+            if scrollCoordinator.shouldAutomaticallyFollowLatest {
+                scrollCoordinator.scrollToLatest()
+            }
+            // Keep the transaction closed until UICollectionView has materialized the target
+            // cell. Parsed content can then enqueue its own height transaction without overlap.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.collectionView.layoutIfNeeded()
+                if self.scrollCoordinator.shouldAutomaticallyFollowLatest {
+                    self.scrollCoordinator.scrollToLatest()
+                }
+                self.completeCollectionUpdate()
+            }
+
+        case .preserveBlock(let blockID, let viewportOffset):
+            // Compositional-layout self-sizing settles on the following layout turn. Keep the
+            // transaction closed until the single viewport adjustment has been applied.
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.collectionView.layoutIfNeeded()
+                self.restoreViewportPosition(of: blockID, offset: viewportOffset)
+                self.completeCollectionUpdate()
+            }
+        }
+    }
+
+    private func completeCollectionUpdate() {
+        isPerformingCollectionUpdate = false
+
+        while !isPerformingCollectionUpdate {
+            if let pending = pendingCollectionUpdate {
+                pendingCollectionUpdate = nil
+                apply(pending)
+                return
+            }
+            if let anchor = pendingViewportResizeRestorationAnchor {
+                pendingViewportResizeRestorationAnchor = nil
+                performViewportResizeRestoration(anchor)
+                return
+            }
+            if let blockID = pendingCellReconfigurationBlockIDs.first {
+                pendingCellReconfigurationBlockIDs.remove(blockID)
+                reconfigure(blockID)
+                continue
+            }
+            if let blockID = pendingHeightChangeBlockIDs.first {
+                pendingHeightChangeBlockIDs.remove(blockID)
+                handleCellHeightChange(blockID)
+                continue
+            }
+            return
         }
     }
 
@@ -469,21 +699,26 @@ public final class AgentConversationViewController: UIViewController {
         }
     }
 
-    private func reconcileVisibleItems() {
-        var snapshot = dataSource.snapshot()
-        snapshot.reconfigureItems(snapshot.itemIdentifiers)
-        dataSource.apply(snapshot, animatingDifferences: false)
+    private func reconfigureVisibleItems() {
+        let visibleIndexPaths = collectionView.indexPathsForVisibleItems
+        guard !visibleIndexPaths.isEmpty else { return }
+        UIView.performWithoutAnimation {
+            collectionView.reconfigureItems(at: visibleIndexPaths)
+        }
+        reconfigureVisibleTurnHeaders(ids: Set(displayedTurns.map(\.id)))
     }
 
     private func route(_ action: AgentBlockUIAction) {
         switch action {
         case .toggleExpanded(let blockID):
-            if !expandedBlockIDs.insert(blockID).inserted { expandedBlockIDs.remove(blockID) }
-            reconfigure(blockID, animated: true)
+            if !expandedBlockIDs.insert(blockID).inserted {
+                expandedBlockIDs.remove(blockID)
+            }
+            reconfigure(blockID)
 
         case .copy(let blockID):
             if let block = turnAndBlock(for: blockID)?.block {
-                UIPasteboard.general.string = copyText(for: block)
+                UIPasteboard.general.string = AgentBlockCopyText.text(for: block)
             }
 
         case .openArtifact(let id):
@@ -537,21 +772,38 @@ public final class AgentConversationViewController: UIViewController {
     private func handleComposer(_ action: AgentComposerAction) {
         switch action {
         case .send(let text, let attachments):
+            guard canSubmitComposer else { return }
+            isComposerSubmissionPending = true
             let pendingState = currentComposerState()
             let request = AgentSubmitRequest(
                 conversationID: store.snapshot.id,
                 text: text,
                 attachments: attachments
             )
-            composer.apply(.init(isRunning: true))
+            var submittedState = pendingState
+            submittedState.text = ""
+            submittedState.attachments = []
+            submittedState.attachmentStatuses = [:]
+            submittedState.isRunning = configuration.runtimeCapabilities.contains(.interrupt)
+            submittedState.canSend = false
+            submittedState.statusMessage = AgentStrings.running
+            applyComposerState(submittedState)
+            delegate?.conversationViewController(self, didUpdateDraftAttachments: [])
             perform(
                 .runtime(.submit(request)),
                 success: { [weak self] in
-                    guard let self else { return }
-                    self.composer.apply(.init(isRunning: self.isConversationRunning))
+                    guard let self, case .offline = self.store.snapshot.state else { return }
+                    self.isComposerSubmissionPending = false
+                    self.updateComposerState()
                 },
                 failure: { [weak self] in
-                    self?.composer.apply(pendingState)
+                    guard let self else { return }
+                    self.isComposerSubmissionPending = false
+                    self.applyComposerState(pendingState)
+                    self.delegate?.conversationViewController(
+                        self,
+                        didUpdateDraftAttachments: pendingState.attachments
+                    )
                 }
             )
         case .stop:
@@ -561,7 +813,33 @@ public final class AgentConversationViewController: UIViewController {
             )
         case .pickAttachments:
             guard configuration.runtimeCapabilities.contains(.attachments) else { return }
-            delegate?.conversationViewControllerDidRequestAttachments(self, sourceView: composer)
+            delegate?.conversationViewControllerDidRequestAttachments(
+                self,
+                sourceView: composerView
+            )
+        case .removeAttachment(let attachmentID):
+            var state = currentComposerState()
+            state.attachments.removeAll { $0.id == attachmentID }
+            state.attachmentStatuses[attachmentID] = nil
+            applyComposerState(state)
+            delegate?.conversationViewController(
+                self,
+                didUpdateDraftAttachments: state.attachments
+            )
+        case .retryAttachment(let attachmentID):
+            delegate?.conversationViewController(
+                self,
+                didRequestRetryFor: attachmentID
+            )
+        case .selectAccessory(let id):
+            perform(
+                .host(
+                    .custom(
+                        kind: "agentchat.composer.accessory",
+                        payload: .object(["id": .string(id)])
+                    )
+                )
+            )
         }
     }
 
@@ -610,16 +888,55 @@ public final class AgentConversationViewController: UIViewController {
     }
 
     private func updateComposerState() {
+        if isConversationRunning {
+            isComposerSubmissionPending = false
+        }
         var state = currentComposerState()
-        state.isRunning = isConversationRunning
-        state.canSend = true
-        composer.apply(state)
+        let canInterrupt = configuration.runtimeCapabilities.contains(.interrupt)
+        state.isRunning = isConversationRunning && canInterrupt
+        scrollCoordinator.setStreaming(isConversationRunning)
+        state.canPickAttachments = configuration.runtimeCapabilities.contains(.attachments)
+        state.accessories = configuration.composerAccessories
+        state.contextDescription = configuration.composerContextDescription
+        switch store.snapshot.state {
+        case .connected, .idle:
+            state.statusMessage = isConversationRunning ? AgentStrings.running : nil
+            state.canSend = !isConversationRunning
+        case .connecting:
+            state.statusMessage = AgentStrings.connecting
+            state.canSend = false
+        case .offline(let message):
+            state.statusMessage = message ?? AgentStrings.offline
+            state.canSend = configuration.allowsSendingWhileOffline && !isConversationRunning
+        case .failed(let failure):
+            state.statusMessage = failure.message
+            state.canSend = false
+        }
+        applyComposerState(state)
     }
 
     private func currentComposerState() -> AgentComposerState {
-        var state = composer.currentState
-        state.isRunning = isConversationRunning
+        var state =
+            (composer as? any AgentComposerInteracting)?.currentState
+            ?? lastComposerState
+        state.isRunning =
+            isConversationRunning
+            && configuration.runtimeCapabilities.contains(.interrupt)
         return state
+    }
+
+    private func applyComposerState(_ state: AgentComposerState) {
+        lastComposerState = state
+        composer.apply(state)
+    }
+
+    private var canSubmitComposer: Bool {
+        guard !isComposerSubmissionPending, !isConversationRunning else { return false }
+        return switch store.snapshot.state {
+        case .connected, .idle: true
+        case .offline: configuration.allowsSendingWhileOffline
+        case .connecting, .failed: false
+        }
     }
 
     private var isConversationRunning: Bool {
@@ -646,6 +963,28 @@ public final class AgentConversationViewController: UIViewController {
             : AgentStrings.jumpToLatest
     }
 
+    private func setHistoryLoading(_ isLoading: Bool) {
+        isLoadingHistory = isLoading
+        if isLoading {
+            historyLoadingIndicator.startAnimating()
+        } else {
+            historyLoadingIndicator.stopAnimating()
+        }
+    }
+
+    private func finishScrollInteraction() {
+        isHistoryRequestArmed = false
+        scrollCoordinator.userDidEndInteraction()
+        DispatchQueue.main.asyncAfter(
+            deadline: .now() + AgentScrollPolicy.userInteractionCooldown + 0.01
+        ) { [weak self] in
+            guard let self, self.scrollCoordinator.shouldAutomaticallyFollowLatest else { return }
+            // A final height update may have landed during the cooldown. Reconcile once
+            // after direct manipulation without overriding a newer history-reading intent.
+            self.scrollCoordinator.scrollToLatest()
+        }
+    }
+
     private func showConnectionBanner() {
         bannerHeightConstraint?.isActive = false
         connectionBanner.isHidden = false
@@ -656,6 +995,86 @@ public final class AgentConversationViewController: UIViewController {
             if let block = turn.blocks.first(where: { $0.id == blockID }) { return (turn, block) }
         }
         return nil
+    }
+
+    private func displayedTurnAndBlock(
+        at indexPath: IndexPath
+    ) -> (turn: AgentTurn, block: AgentBlock)? {
+        guard displayedTurns.indices.contains(indexPath.section),
+            displayedTurns[indexPath.section].blocks.indices.contains(indexPath.item)
+        else { return nil }
+        let turn = displayedTurns[indexPath.section]
+        return (turn, turn.blocks[indexPath.item])
+    }
+
+    private func blockID(at indexPath: IndexPath) -> AgentBlockID? {
+        displayedTurnAndBlock(at: indexPath)?.block.id
+    }
+
+    private func indexPath(for blockID: AgentBlockID) -> IndexPath? {
+        for (section, turn) in displayedTurns.enumerated() {
+            if let item = turn.blocks.firstIndex(where: { $0.id == blockID }) {
+                return IndexPath(item: item, section: section)
+            }
+        }
+        return nil
+    }
+
+    private func makeRenderContext(
+        turn: AgentTurn,
+        block: AgentBlock
+    ) -> AgentBlockRenderContext {
+        AgentBlockRenderContext(
+            conversationID: store.snapshot.id,
+            turn: turn,
+            block: block,
+            availableWidth: availableContentWidth,
+            theme: theme,
+            environment: AgentRenderEnvironment(
+                contentSizeCategory: traitCollection.preferredContentSizeCategory.rawValue,
+                reduceMotionEnabled: UIAccessibility.isReduceMotionEnabled,
+                resolvingApprovalIDs: resolvingApprovalIDs,
+                expandedBlockIDs: expandedBlockIDs,
+                canRetry: configuration.runtimeCapabilities.contains(.retry),
+                toolPresentationStyle: configuration.toolPresentationStyle
+            ),
+            imageProvider: configuration.imageProvider,
+            actionSink: AgentBlockActionSink { [weak self] action in
+                self?.route(action)
+            }
+        )
+    }
+
+    private func reconfigureVisibleTurnHeaders(ids: Set<AgentTurnID>) {
+        guard !ids.isEmpty else { return }
+        for section in displayedTurns.indices where ids.contains(displayedTurns[section].id) {
+            let indexPath = IndexPath(item: 0, section: section)
+            guard
+                let header = collectionView.supplementaryView(
+                    forElementKind: UICollectionView.elementKindSectionHeader,
+                    at: indexPath
+                ) as? AgentTurnHeaderView
+            else { continue }
+            header.configure(turn: displayedTurns[section])
+        }
+    }
+
+    private func handleCellHeightChange(_ blockID: AgentBlockID) {
+        guard !isPerformingCollectionUpdate else {
+            pendingHeightChangeBlockIDs.insert(blockID)
+            return
+        }
+        guard let indexPath = indexPath(for: blockID),
+            collectionView.indexPathsForVisibleItems.contains(indexPath)
+        else { return }
+
+        isPerformingCollectionUpdate = true
+        let shouldFollow = scrollCoordinator.shouldAutomaticallyFollowLatest
+        UIView.performWithoutAnimation {
+            collectionView.performBatchUpdates(nil) { [weak self] _ in
+                self?.finishCollectionUpdate(shouldFollow ? .followLatest : .none)
+            }
+        }
     }
 
     /// Defensively mirrors the reducer's first-identifier-wins policy for host-supplied stores.
@@ -670,36 +1089,34 @@ public final class AgentConversationViewController: UIViewController {
         }
     }
 
-    private func reconfigure(_ blockID: AgentBlockID, animated: Bool = false) {
-        var snapshot = dataSource.snapshot()
-        guard snapshot.itemIdentifiers.contains(blockID) else { return }
-        snapshot.reconfigureItems([blockID])
-        let shouldAnimate = animated && !UIAccessibility.isReduceMotionEnabled
-        let anchor =
-            scrollCoordinator.isFollowingLatest
-            ? nil : scrollCoordinator.captureAnchor(edge: .top)
-        dataSource.apply(snapshot, animatingDifferences: false) { [weak self] in
-            guard let self else { return }
-            self.collectionView.collectionViewLayout.invalidateLayout()
-            let updates = {
-                self.collectionView.layoutIfNeeded()
-                if let anchor {
-                    self.scrollCoordinator.restore(anchor)
-                } else if self.scrollCoordinator.isFollowingLatest {
-                    self.scrollCoordinator.scrollToLatest(animated: false)
-                }
-            }
-            guard shouldAnimate else {
-                updates()
-                return
-            }
-            UIView.animate(
-                withDuration: 0.24,
-                delay: 0,
-                options: [.allowUserInteraction, .beginFromCurrentState, .curveEaseInOut],
-                animations: updates
-            )
+    private func reconfigure(_ blockID: AgentBlockID) {
+        guard !isPerformingCollectionUpdate else {
+            pendingCellReconfigurationBlockIDs.insert(blockID)
+            return
         }
+        guard let indexPath = indexPath(for: blockID),
+            let attributes = collectionView.layoutAttributesForItem(at: indexPath)
+        else { return }
+        let viewportOffset = attributes.frame.minY - collectionView.contentOffset.y
+        isPerformingCollectionUpdate = true
+        UIView.performWithoutAnimation {
+            collectionView.reconfigureItems(at: [indexPath])
+            collectionView.performBatchUpdates(nil) { [weak self] _ in
+                self?.finishCollectionUpdate(
+                    .preserveBlock(blockID, viewportOffset: viewportOffset)
+                )
+            }
+        }
+    }
+
+    private func restoreViewportPosition(of blockID: AgentBlockID, offset: CGFloat) {
+        guard let indexPath = indexPath(for: blockID),
+            let attributes = collectionView.layoutAttributesForItem(at: indexPath)
+        else { return }
+        collectionView.setContentOffset(
+            CGPoint(x: collectionView.contentOffset.x, y: attributes.frame.minY - offset),
+            animated: false
+        )
     }
 
     private func reconfigureApproval(_ approvalID: AgentApprovalID) {
@@ -727,27 +1144,19 @@ public final class AgentConversationViewController: UIViewController {
         resolvingApprovalIDs.formIntersection(unresolved)
     }
 
-    private func copyText(for block: AgentBlock) -> String {
-        switch block.content {
-        case .userText(let value): value.text
-        case .markdown(let value): value.markdown
-        case .command(let value): value.output.text.isEmpty ? value.command : value.output.text
-        case .custom(let value):
-            (try? String(
-                data: JSONEncoder().encode(value.payload),
-                encoding: .utf8
-            )) ?? value.fallbackTitle
-        default: String(describing: block.content)
+    @objc func sendFromKeyboard() {
+        (composer as? any AgentComposerInteracting)?.performPrimaryAction()
+    }
+
+    @objc func focusComposer() {
+        if let composer = composer as? any AgentComposerInteracting {
+            _ = composer.focus()
+        } else {
+            _ = composerView.becomeFirstResponder()
         }
     }
 
-    @objc private func sendFromKeyboard() {
-        composer.submitCurrentInput()
-    }
-
-    @objc private func focusComposer() { composer.focus() }
-
-    @objc private func stopFromKeyboard() {
+    @objc func stopFromKeyboard() {
         guard isConversationRunning else { return }
         handleComposer(.stop)
     }
@@ -757,20 +1166,88 @@ public final class AgentConversationViewController: UIViewController {
     }
 
     @objc private func applicationWillEnterForeground() {
-        let anchor =
-            scrollCoordinator.isFollowingLatest
-            ? nil : scrollCoordinator.captureAnchor(edge: .top)
         updateScheduler.setActive(true)
-        reconcileStructuralSnapshot(
-            animated: false,
-            anchor: anchor,
-            followLatest: scrollCoordinator.isFollowingLatest
-        )
+    }
+
+    @objc private func contentSizeCategoryDidChange() {
+        guard isViewLoaded, view.window != nil else { return }
+        let anchor = beginViewportResize()
+        endViewportResize(restoring: anchor)
     }
 }
 
-extension AgentConversationViewController: UICollectionViewDelegate {
+extension AgentConversationViewController: UICollectionViewDataSource, UICollectionViewDelegate {
+    public func numberOfSections(in collectionView: UICollectionView) -> Int {
+        displayedTurns.count
+    }
+
+    public func collectionView(
+        _ collectionView: UICollectionView,
+        numberOfItemsInSection section: Int
+    ) -> Int {
+        guard displayedTurns.indices.contains(section) else { return 0 }
+        return displayedTurns[section].blocks.count
+    }
+
+    public func collectionView(
+        _ collectionView: UICollectionView,
+        cellForItemAt indexPath: IndexPath
+    ) -> UICollectionViewCell {
+        guard let (turn, block) = displayedTurnAndBlock(at: indexPath) else {
+            return UICollectionViewCell()
+        }
+        let cell = rendererRegistry.renderer(for: block).dequeueConfiguredCell(
+            from: collectionView,
+            at: indexPath,
+            context: makeRenderContext(turn: turn, block: block)
+        )
+        if let cell = cell as? AgentBlockCell {
+            cell.didChangeHeight = { [weak self, weak cell] in
+                guard let self, let cell,
+                    self.collectionView.indexPath(for: cell) == self.indexPath(for: block.id)
+                else { return }
+                self.handleCellHeightChange(block.id)
+            }
+        }
+        return cell
+    }
+
+    public func collectionView(
+        _ collectionView: UICollectionView,
+        contextMenuConfigurationForItemAt indexPath: IndexPath,
+        point: CGPoint
+    ) -> UIContextMenuConfiguration? {
+        guard let (turn, block) = displayedTurnAndBlock(at: indexPath) else { return nil }
+        return UIContextMenuConfiguration(
+            identifier: block.id.rawValue as NSString,
+            previewProvider: nil
+        ) { [weak self] _ in
+            guard let self else { return nil }
+            return AgentBlockContextMenu.make(
+                for: self.makeRenderContext(turn: turn, block: block)
+            )
+        }
+    }
+
+    public func collectionView(
+        _ collectionView: UICollectionView,
+        viewForSupplementaryElementOfKind kind: String,
+        at indexPath: IndexPath
+    ) -> UICollectionReusableView {
+        guard kind == UICollectionView.elementKindSectionHeader,
+            displayedTurns.indices.contains(indexPath.section),
+            let header = collectionView.dequeueReusableSupplementaryView(
+                ofKind: kind,
+                withReuseIdentifier: AgentTurnHeaderView.reuseIdentifier,
+                for: indexPath
+            ) as? AgentTurnHeaderView
+        else { return UICollectionReusableView() }
+        header.configure(turn: displayedTurns[indexPath.section])
+        return header
+    }
+
     public func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        isHistoryRequestArmed = true
         scrollCoordinator.userWillBeginDragging()
     }
 
@@ -778,12 +1255,14 @@ extension AgentConversationViewController: UICollectionViewDelegate {
         scrollCoordinator.userDidScroll()
         let topThreshold = -scrollView.adjustedContentInset.top + 160
         if scrollView.contentOffset.y <= topThreshold,
+            isHistoryRequestArmed,
             store.snapshot.hasEarlierHistory,
             configuration.runtimeCapabilities.contains(.history),
             !isLoadingHistory,
             actionHandler != nil
         {
-            isLoadingHistory = true
+            isHistoryRequestArmed = false
+            setHistoryLoading(true)
             perform(
                 .runtime(
                     .loadEarlier(
@@ -792,7 +1271,10 @@ extension AgentConversationViewController: UICollectionViewDelegate {
                             cursor: store.snapshot.earlierHistoryCursor
                         )
                     )
-                )
+                ),
+                failure: { [weak self] in
+                    self?.setHistoryLoading(false)
+                }
             )
         }
     }
@@ -800,14 +1282,115 @@ extension AgentConversationViewController: UICollectionViewDelegate {
     public func scrollViewDidEndDragging(
         _ scrollView: UIScrollView, willDecelerate decelerate: Bool
     ) {
-        if !decelerate { scrollCoordinator.userDidEndInteraction() }
+        if !decelerate { finishScrollInteraction() }
     }
 
     public func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        scrollCoordinator.userDidEndInteraction()
+        finishScrollInteraction()
     }
 
-    public func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-        scrollCoordinator.programmaticScrollDidEnd()
+}
+
+private enum AgentCollectionCompletionIntent {
+    case none
+    case followLatest
+    case restoreHistory(AgentLayoutAnchor)
+    case preserveBlock(AgentBlockID, viewportOffset: CGFloat)
+}
+
+struct AgentTimelineBatchChanges {
+    let deletedSections: IndexSet
+    let insertedSections: IndexSet
+    let deletedItems: [IndexPath]
+    let insertedItems: [IndexPath]
+    let appendsAtEnd: Bool
+
+    var hasChanges: Bool {
+        !deletedSections.isEmpty || !insertedSections.isEmpty
+            || !deletedItems.isEmpty || !insertedItems.isEmpty
+    }
+
+    init?(from previous: [AgentTurn], to updated: [AgentTurn]) {
+        let previousTurnIDs = previous.map(\.id)
+        let updatedTurnIDs = updated.map(\.id)
+        let previousTurnIDSet = Set(previousTurnIDs)
+        let updatedTurnIDSet = Set(updatedTurnIDs)
+
+        let retainedPreviousTurnIDs = previousTurnIDs.filter(updatedTurnIDSet.contains)
+        let retainedUpdatedTurnIDs = updatedTurnIDs.filter(previousTurnIDSet.contains)
+        guard retainedPreviousTurnIDs == retainedUpdatedTurnIDs else { return nil }
+
+        deletedSections = IndexSet(
+            previousTurnIDs.enumerated().compactMap { offset, id in
+                updatedTurnIDSet.contains(id) ? nil : offset
+            }
+        )
+        insertedSections = IndexSet(
+            updatedTurnIDs.enumerated().compactMap { offset, id in
+                previousTurnIDSet.contains(id) ? nil : offset
+            }
+        )
+
+        let previousByID = Dictionary(uniqueKeysWithValues: previous.map { ($0.id, $0) })
+        let updatedByID = Dictionary(uniqueKeysWithValues: updated.map { ($0.id, $0) })
+        let previousSectionByID = Dictionary(
+            uniqueKeysWithValues: previousTurnIDs.enumerated().map { ($0.element, $0.offset) }
+        )
+        let updatedSectionByID = Dictionary(
+            uniqueKeysWithValues: updatedTurnIDs.enumerated().map { ($0.element, $0.offset) }
+        )
+
+        var deletedItems: [IndexPath] = []
+        var insertedItems: [IndexPath] = []
+        for turnID in retainedPreviousTurnIDs {
+            guard let previousTurn = previousByID[turnID],
+                let updatedTurn = updatedByID[turnID],
+                let previousSection = previousSectionByID[turnID],
+                let updatedSection = updatedSectionByID[turnID]
+            else { return nil }
+
+            let previousBlockIDs = previousTurn.blocks.map(\.id)
+            let updatedBlockIDs = updatedTurn.blocks.map(\.id)
+            let previousBlockIDSet = Set(previousBlockIDs)
+            let updatedBlockIDSet = Set(updatedBlockIDs)
+            guard
+                previousBlockIDs.filter(updatedBlockIDSet.contains)
+                    == updatedBlockIDs.filter(previousBlockIDSet.contains)
+            else { return nil }
+
+            deletedItems.append(
+                contentsOf: previousBlockIDs.enumerated().compactMap { item, id in
+                    updatedBlockIDSet.contains(id)
+                        ? nil : IndexPath(item: item, section: previousSection)
+                }
+            )
+            insertedItems.append(
+                contentsOf: updatedBlockIDs.enumerated().compactMap { item, id in
+                    previousBlockIDSet.contains(id)
+                        ? nil : IndexPath(item: item, section: updatedSection)
+                }
+            )
+        }
+
+        self.deletedItems = deletedItems
+        self.insertedItems = insertedItems
+        let hasInsertion = !insertedSections.isEmpty || !insertedItems.isEmpty
+        let existingTurnsAppendOnlyAtTail = previous.enumerated().allSatisfy {
+            section, previousTurn in
+            guard let updatedTurn = updatedByID[previousTurn.id] else { return false }
+            let previousBlockIDs = previousTurn.blocks.map(\.id)
+            let updatedBlockIDs = updatedTurn.blocks.map(\.id)
+            if section == previous.count - 1 {
+                return Array(updatedBlockIDs.prefix(previousBlockIDs.count))
+                    == previousBlockIDs
+            }
+            return updatedBlockIDs == previousBlockIDs
+        }
+        appendsAtEnd =
+            hasInsertion
+            && deletedSections.isEmpty
+            && deletedItems.isEmpty
+            && Array(updatedTurnIDs.prefix(previousTurnIDs.count)) == previousTurnIDs
+            && existingTurnsAppendOnlyAtTail
     }
 }

@@ -96,6 +96,33 @@ final class AgentMarkdownParserTests: XCTestCase {
         XCTAssertTrue(result.wasTruncated)
     }
 
+    func testUnifiedDiffCacheIsBoundedAndExplicitlyInvalidated() async {
+        let parser = AgentUnifiedDiffParser(cacheCapacity: 1)
+        let firstKey = AgentUnifiedDiffCacheKey(identifier: "first", revision: 1)
+        let secondKey = AgentUnifiedDiffCacheKey(identifier: "second", revision: 1)
+        let first = await parser.parse(
+            "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+first\n",
+            cacheKey: firstKey
+        )
+        let cached = await parser.parse(
+            "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+changed\n",
+            cacheKey: firstKey
+        )
+        XCTAssertEqual(first, cached)
+
+        _ = await parser.parse(
+            "--- a/b\n+++ b/b\n@@ -1 +1 @@\n-old\n+second\n",
+            cacheKey: secondKey
+        )
+        let reparsed = await parser.parse(
+            "--- a/a\n+++ b/a\n@@ -1 +1 @@\n-old\n+changed\n",
+            cacheKey: firstKey
+        )
+        XCTAssertNotEqual(first, reparsed)
+        await parser.removeCachedResults(identifiers: ["first"])
+        await parser.removeAllCachedResults()
+    }
+
     private func key(_ id: AgentBlockID, revision: Int64) -> AgentMarkdownCacheKey {
         .init(
             blockID: id,
@@ -104,5 +131,45 @@ final class AgentMarkdownParserTests: XCTestCase {
             contentSizeCategory: "large",
             themeVersion: 1
         )
+    }
+
+    func testStreamingParseDebouncesIntermediateContentAndCancelsStaleWork() async throws {
+        let parser = AgentMarkdownParser()
+        let clock = ContinuousClock()
+        let started = clock.now
+        _ = try await parser.parseStreaming(
+            "A streaming **fragment",
+            isFinal: false,
+            debounceMilliseconds: 40
+        )
+        XCTAssertGreaterThanOrEqual(started.duration(to: clock.now), .milliseconds(35))
+
+        let stale = Task {
+            try await parser.parseStreaming(
+                "A stale fragment",
+                isFinal: false,
+                debounceMilliseconds: 80
+            )
+        }
+        stale.cancel()
+        do {
+            _ = try await stale.value
+            XCTFail("Expected stale streaming parse to be cancelled")
+        } catch is CancellationError {
+            // Expected: a reused cell must not apply stale Markdown.
+        }
+    }
+
+    func testFinalStreamingParseSkipsDebounce() async throws {
+        let parser = AgentMarkdownParser()
+        let clock = ContinuousClock()
+        let started = clock.now
+        let document = try await parser.parseStreaming(
+            "Final **content**",
+            isFinal: true,
+            debounceMilliseconds: 80
+        )
+        XCTAssertFalse(document.blocks.isEmpty)
+        XCTAssertLessThan(started.duration(to: clock.now), .milliseconds(60))
     }
 }
